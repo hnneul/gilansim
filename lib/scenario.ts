@@ -16,9 +16,11 @@
 
 import type { LatLng } from "@/app/RouteMap";
 import type { RiskFactor } from "./score";
-import type { Parking } from "./parking";
+import { nearbyParking, type Parking, type Lot } from "./parking";
+import { nearbyGoodprice, type Goodprice, type Shop } from "./goodprice";
 import DATA from "@/data/route-data.json";
 import PARKING from "@/data/parking-data.json";
+import GOODPRICE from "@/data/goodprice-data.json";
 
 /**
  * 소요시간·거리 출처: 카카오모빌리티 길찾기 API (미래 운행 정보, 2026-07-28 10:00 출발 기준)
@@ -133,11 +135,43 @@ const SAFE: Route = {
  */
 export const PARKING_SOURCE = `${PARKING.source} · 주차장유형(노상/노외)을 평행·직각 주차 프록시로 사용`;
 
+/**
+ * 목적지 좌표 → 주변 주차장. 굳혀둔 3구간과 임의 구간이 **같은 함수**를 쓴다 —
+ * 목적지별로 미리 잘라둔 목록을 두면 임의 구간에서 쓸 수 없고, 두 경로가 갈리면
+ * 같은 목적지에 다른 숫자가 나온다.
+ *
+ * JSON 임포트는 좌표를 number[] 로 넓혀 읽어서 [number, number] 튜플과 겹치지 않는다.
+ * 생성 쪽(build-parking-data.mjs)이 항상 두 개를 넣으므로 여기서 좁혀준다.
+ */
+export function parkingAt(label: string, at: LatLng): Parking | null {
+  return nearbyParking(label, at, PARKING.spots as unknown as Lot[], PARKING.walkM);
+}
+
+/**
+ * 목적지 주변 착한가격업소. 타입과 거리 필터는 lib/goodprice.ts 에 있다 —
+ * 임의 목적지를 받게 되면서 런타임 로직이 생겼고, 그건 데이터 임포트 없이 검증할 수
+ * 있는 자리에 있어야 한다 (lib/parking.ts 와 같은 이유).
+ */
+export const GOODPRICE_SOURCE = `${GOODPRICE.source} · jeju.go.kr 물가정보`;
+
+export function goodpriceAt(label: string, at: LatLng): Goodprice | null {
+  return nearbyGoodprice(label, at, GOODPRICE.shops as unknown as Shop[], GOODPRICE.radiusM);
+}
+
+/** 굳혀둔 구간용 지름길 — 도착 마커의 좌표·이름을 그대로 쓴다. */
+const 도착 = (id: string) => {
+  const s = SCENARIOS.find((x) => x.id === id);
+  return s ? s.markers[s.markers.length - 1] : null;
+};
+
 export function parkingFor(scenarioId: string): Parking | null {
-  // JSON 임포트는 좌표를 number[] 로 넓혀 읽어서 [number, number] 튜플과 겹치지 않는다.
-  // 생성 쪽(build-parking-data.mjs)이 항상 두 개를 넣으므로 여기서 좁혀준다.
-  const d = (PARKING.byDestination as unknown as Record<string, Parking | undefined>)[scenarioId];
-  return d && d.total > 0 ? d : null;
+  const d = 도착(scenarioId);
+  return d ? parkingAt(d.label, d.coord) : null;
+}
+
+export function goodpriceFor(scenarioId: string): Goodprice | null {
+  const d = 도착(scenarioId);
+  return d ? goodpriceAt(d.label, d.coord) : null;
 }
 
 export const SCENARIOS: Scenario[] = [

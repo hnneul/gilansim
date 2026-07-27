@@ -9,8 +9,16 @@ import RouteMap, { type MarkerIcon } from "../RouteMap";
 import { aiSentences, factsOf, type AiSentences } from "@/lib/ai";
 import { scoreRoutes, activeWeights, isNovice, type RiskFactor, type DriverProfile } from "@/lib/score";
 import { briefing } from "@/lib/briefing";
-import { SCENARIOS, parkingFor, PARKING_SOURCE, type Route } from "@/lib/scenario";
+import {
+  SCENARIOS,
+  parkingFor,
+  PARKING_SOURCE,
+  goodpriceFor,
+  GOODPRICE_SOURCE,
+  type Route,
+} from "@/lib/scenario";
 import { parallelOdds, recommendedSpots, nearestSpots, type Parking, type ParallelOdds } from "@/lib/parking";
+import { type Goodprice } from "@/lib/goodprice";
 import { parseProfile } from "@/lib/profile";
 import { liveTraffic, congestionLabel, type Live } from "@/lib/traffic";
 
@@ -77,6 +85,7 @@ function MapArea({
   const parking = parkingFor(scenario.id);
   // 평행주차 판정은 초보에게만 낸다 — 경력자에겐 노상·노외 구분이 의미가 없다.
   const odds = parking && isNovice(profile) ? parallelOdds(parking!) : null;
+  const goodprice = goodpriceFor(scenario.id);
   return (
     <div className="flex h-[52vh] min-h-72 w-full gap-2 lg:h-[68vh] lg:min-h-[32rem]">
       <div className="min-w-0 flex-1">
@@ -89,6 +98,12 @@ function MapArea({
           </RailButton>
         )}
         {children}
+        {/* 착한가격업소는 주차·팁 아래에 둔다 — 운전 부담과 상관없는 부가 정보라 위계가 가장 낮다 */}
+        {goodprice && (
+          <RailButton glyph="₩" label="착한가격">
+            <GoodpricePanel gp={goodprice} />
+          </RailButton>
+        )}
       </div>
     </div>
   );
@@ -246,6 +261,81 @@ const 주차장아이콘 = pin(
    </svg>`,
   [22, 22],
 );
+
+const 착한가격아이콘 = pin(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+     <circle cx="11" cy="11" r="9" fill="#0d9488" stroke="#fff" stroke-width="2.5"/>
+     <text x="11" y="15" font-family="system-ui,sans-serif" font-size="11" font-weight="700"
+           fill="#fff" text-anchor="middle">₩</text>
+   </svg>`,
+  [22, 22],
+);
+
+/**
+ * 목적지 주변 착한가격업소.
+ *
+ * 판정도 추천도 없다 — 지자체가 이미 선정해 둔 목록이고, 우리가 얹을 근거가 없다.
+ * 그래서 가까운 순으로 사실만 준다 (주차 패널의 경력자 쪽과 같은 태도다).
+ *
+ * 선정 시점(since)을 같이 적는다. 2020년에 선정된 가격이 지금도 그 값이라는 보장이 없고,
+ * 확인 못 한 걸 최신인 척 보여주면 이 앱이 지키려는 선을 넘는다.
+ */
+function GoodpricePanel({ gp }: { gp: Goodprice }) {
+  const km = (gp.radiusM / 1000).toFixed(gp.radiusM % 1000 ? 1 : 0);
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-base font-bold leading-snug">{gp.label} 주변 착한가격업소</p>
+      <p className="tabular-nums opacity-70">
+        {km}km 내 {gp.total}곳 · 가까운 순 ·{" "}
+        {Object.entries(gp.byKind)
+          .map(([k, n]) => `${k} ${n}`)
+          .join(" · ")}
+      </p>
+
+      <div className="h-56 overflow-hidden rounded-lg lg:h-80">
+        <RouteMap
+          center={gp.at}
+          routes={[]}
+          markers={[
+            { coord: gp.at, label: gp.label },
+            ...gp.shops.map((s) => ({
+              coord: s.at,
+              label: `${s.name} (${s.kind} · ${s.distM}m)`,
+              icon: 착한가격아이콘,
+            })),
+          ]}
+        />
+      </div>
+      <p className="text-xs opacity-70">
+        지도에 {gp.shops.length}곳 표시 ({km}km 내 {gp.total}곳)
+      </p>
+
+      {gp.shops.slice(0, 5).map((s) => (
+        <div key={s.name + s.distM} className="rounded-lg bg-black/[0.04] p-2">
+          <div className="font-medium">
+            {s.name} <span className="text-xs font-normal opacity-60">{s.kind}</span>
+          </div>
+          <div className="mt-0.5 tabular-nums opacity-70">
+            {s.distM}m · {s.addr}
+            {s.tel && ` · ${s.tel}`}
+          </div>
+          {s.menu.length > 0 && (
+            <div className="mt-1 tabular-nums opacity-80">{s.menu.slice(0, 2).join(" · ")}</div>
+          )}
+          {(s.time || s.since) && (
+            <div className="mt-0.5 text-xs opacity-50">{[s.time, s.since].filter(Boolean).join(" · ")}</div>
+          )}
+        </div>
+      ))}
+
+      <p className="text-xs leading-relaxed opacity-60">
+        가격은 선정 당시 기준이라 지금과 다를 수 있습니다. 가기 전에 전화로 확인하세요.
+        <br />
+        출처: {GOODPRICE_SOURCE}
+      </p>
+    </div>
+  );
+}
 
 /**
  * 목적지 반경 안 주차장 미니 지도.

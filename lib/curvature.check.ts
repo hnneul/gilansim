@@ -2,7 +2,10 @@
 // score.check.ts와 같은 방식. 급커브 개수가 근거 카드에 그대로 나가므로 계산이 틀리면 안 된다.
 
 import assert from "node:assert";
-import { curveRadius, distance, sharpCurves, simplify, densestCluster, type LatLng } from "./curvature.ts";
+import {
+  curveRadius, distance, sharpCurves, simplify, densestCluster,
+  sharpRadiusFor, MIN_CURVE_RADIUS, type LatLng,
+} from "./curvature.ts";
 import DATA from "../data/route-data.json" with { type: "json" };
 
 // --- 거리 ---
@@ -24,6 +27,20 @@ assert.ok(Math.abs(r - R) < R * 0.02, `외접원 반지름 오차 과대: ${r.to
 
 // 반지름이 작을수록 급하다
 assert.ok(curveRadius(원(0), 원(20), 원(40)) > 50);
+
+// --- 임계값 유도 (규칙 제19조) ---
+// 표 값 자체가 근거 카드의 출처로 나가므로 오타가 있으면 안 된다
+assert.equal(MIN_CURVE_RADIUS[50], 90);
+assert.equal(MIN_CURVE_RADIUS[60], 140);
+assert.equal(MIN_CURVE_RADIUS[80], 280);
+// 속도가 높을수록 기준이 커진다 — 단조성이 깨지면 빠른 도로가 관대해진다
+const 속도 = Object.keys(MIN_CURVE_RADIUS).map(Number).sort((a, b) => a - b);
+for (let i = 1; i < 속도.length; i++)
+  assert.ok(MIN_CURVE_RADIUS[속도[i]] > MIN_CURVE_RADIUS[속도[i - 1]] || 속도[i] <= 30);
+// 표에 없는 값은 조용히 사라지지 않고 10km/h 단위로 맞춰진다
+assert.equal(sharpRadiusFor(55), sharpRadiusFor(60));
+assert.equal(sharpRadiusFor(999), MIN_CURVE_RADIUS[120]);
+assert.equal(sharpRadiusFor(5), MIN_CURVE_RADIUS[20]);
 
 // --- 급커브 탐지 ---
 // 반지름 50m 원을 따라가는 경로는 전부 급커브지만, 연속이므로 한 구간으로 병합된다
@@ -62,8 +79,12 @@ assert.equal(densestCluster([]), null);
 const { fast, safe } = DATA;
 
 // 이 서비스의 핵심 주장: 최단거리 경로가 더 급커브가 많고, 더 오래 걸린다
+//
+// 배수를 3→2로 낮췄다. 임계값을 규칙 제19조에서 유도하면서 평화로 경로의 기준이
+// 100m→280m로 올라가 접속 구간(중산간서로 등)의 완만한 커브가 잡히기 때문이다.
+// 구간 수는 원래 노출보다 약한 지표다 — 아래 노출 비율 단정이 실제 주장을 지킨다.
 assert.ok(
-  fast.sharpCurve.sections > safe.sharpCurve.sections * 3,
+  fast.sharpCurve.sections > safe.sharpCurve.sections * 2,
   `급커브 차이가 사라졌다: fast ${fast.sharpCurve.sections} vs safe ${safe.sharpCurve.sections}`,
 );
 assert.ok(fast.durationMin > safe.durationMin, "최단거리 경로가 더 빨라졌다면 시나리오를 다시 봐야 한다");

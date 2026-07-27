@@ -53,6 +53,22 @@ async function directions(priority) {
   return json;
 }
 
+/**
+ * 좌표 → 행정구역명. 근거 카드의 "위치"를 지명으로 쓰려면 필요하다.
+ * 지명을 손으로 적으면 데이터가 바뀔 때 조용히 틀린 말이 된다 — 실제로 한 번 그랬다.
+ */
+async function regionOf([la, lo]) {
+  if (!KEY) return null;
+  const res = await fetch(
+    `https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=${lo}&y=${la}`,
+    { headers: { Authorization: `KakaoAK ${KEY}` } },
+  );
+  if (!res.ok) return null;
+  const doc = (await res.json()).documents?.[0];
+  // "제주특별자치도 서귀포시 남원읍 하례리" → "서귀포시 남원읍 하례리"
+  return doc ? doc.address_name.replace(/^제주특별자치도\s*/, "") : null;
+}
+
 // ---------- 표준노드링크 격자 인덱스 ----------
 const links = JSON.parse(readFileSync(`${DATA}jeju_link.geojson`, "utf8")).features;
 const CELL = 0.01;
@@ -175,7 +191,11 @@ for (const [id, priority] of [["fast", "DISTANCE"], ["safe", "TIME"]]) {
       perKm: +(curves.length / (route.summary.distance / 1000)).toFixed(2),
       minRadiusM: curves.length ? Math.round(Math.min(...curves.map((c) => c.minRadius))) : null,
       byRoad: Object.fromEntries(Object.entries(curveByRoad).sort((a, b) => b[1] - a[1])),
-      densest: cluster && { at: cluster.at.map((x) => +x.toFixed(4)), count: cluster.count },
+      densest: cluster && {
+        at: cluster.at.map((x) => +x.toFixed(4)),
+        count: cluster.count,
+        region: await regionOf(cluster.at),
+      },
     },
     narrow: {
       km: +sum(spots.narrow).toFixed(1),
@@ -198,7 +218,7 @@ for (const [id, priority] of [["fast", "DISTANCE"], ["safe", "TIME"]]) {
   console.log(`좌표 ${o.vertexCount}개 → 표시용 ${o.path.length}개 | 매칭 ${o.matchedKm}km, 미매칭 ${o.unmatchedKm}km`);
   const pct = (x) => `${Math.round(x * 100)}%`;
   console.log(`급커브 ${o.sharpCurve.sections}구간 / ${o.sharpCurve.km}km · 굽은구간 ${o.sharpCurve.windingKm}km (노출 ${pct(o.sharpCurve.exposure)}, 최소 R=${o.sharpCurve.minRadiusM}m)`, o.sharpCurve.byRoad);
-  console.log(`  최밀집: 5km 내 ${o.sharpCurve.densest?.count}개 @${o.sharpCurve.densest?.at}`);
+  console.log(`  최밀집: 5km 내 ${o.sharpCurve.densest?.count}개 @${o.sharpCurve.densest?.at} (${o.sharpCurve.densest?.region})`);
   console.log(`차로수1&50↑: ${o.narrow.km}km (노출 ${pct(o.narrow.exposure)})`, o.narrow.byRoad);
   console.log(`제한속도80↑: ${o.highSpeed.km}km (노출 ${pct(o.highSpeed.exposure)})`, o.highSpeed.byRoad);
 }

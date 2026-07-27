@@ -577,28 +577,30 @@
   "matchedKm": 42.1,
   "unmatchedKm": 1,
   "sharpCurve": {
-   "sections": 57,
-   "km": 5.5,
-   "windingKm": 15.1,
-   "windingSections": 14,
-   "exposure": 0.352,
-   "perKm": 1.32,
+   "sections": 54,
+   "km": 5.4,
+   "windingKm": 12.9,
+   "windingSections": 18,
+   "exposure": 0.3,
+   "perKm": 1.25,
    "minRadiusM": 7,
    "byRoad": {
-    "516로": 46,
+    "516로": 42,
     "서광로": 4,
     "중앙로": 3,
     "공항로": 1,
     "용문로": 1,
     "구남로7길": 1,
+    "간월동로": 1,
     "동홍서로": 1
    },
    "densest": {
     "at": [
-     33.4161,
-     126.6187
+     33.3209,
+     126.598
     ],
-    "count": 16
+    "count": 15,
+    "region": "서귀포시 남원읍 하례리"
    }
   },
   "narrow": {
@@ -952,27 +954,29 @@
   "matchedKm": 51.8,
   "unmatchedKm": 0.8,
   "sharpCurve": {
-   "sections": 10,
-   "km": 0.9,
-   "windingKm": 1.8,
-   "windingSections": 7,
+   "sections": 15,
+   "km": 1.4,
+   "windingKm": 1.9,
+   "windingSections": 12,
    "exposure": 0.035,
-   "perKm": 0.19,
+   "perKm": 0.29,
    "minRadiusM": 14,
    "byRoad": {
-    "노형로": 3,
-    "중앙로": 3,
+    "중산간서로": 5,
+    "노형로": 4,
+    "중앙로": 2,
     "다호북길": 1,
     "월광로": 1,
     "우평로": 1,
-    "중산간서로": 1
+    "한창로": 1
    },
    "densest": {
     "at": [
      33.4819,
      126.4634
     ],
-    "count": 5
+    "count": 6,
+    "region": "제주시 노형동"
    }
   },
   "narrow": {

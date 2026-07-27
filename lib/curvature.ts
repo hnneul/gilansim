@@ -32,8 +32,31 @@ export function curveRadius(p0: LatLng, p1: LatLng, p2: LatLng): number {
   return (a * b * c) / (4 * Math.sqrt(area2));
 }
 
-/** 곡선반경 100m 미만 = 급커브. 설계속도 60km/h의 최소곡선반경(약 120m)보다 급하다. */
-export const SHARP_RADIUS = 100;
+/**
+ * 설계속도별 최소 평면곡선반지름(m).
+ * 「도로의 구조·시설 기준에 관한 규칙」 제19조, 최대편경사 6%(지방지역) 기준.
+ *
+ * 급커브 임계값을 여기서 유도한다 — 전역 상수를 쓰면 그 값의 출처를 댈 수 없다.
+ * 규칙 미달 곡선반경이면 그 도로의 설계속도로 안전하게 통과할 수 없다는 뜻이므로,
+ * "급커브"의 정의로 이보다 나은 기준이 없다.
+ */
+export const MIN_CURVE_RADIUS: Record<number, number> = {
+  20: 15, 30: 30, 40: 60, 50: 90, 60: 140,
+  70: 200, 80: 280, 90: 380, 100: 460, 110: 600, 120: 710,
+};
+
+/**
+ * 제한속도에 대응하는 급커브 임계 곡선반경(m).
+ *
+ * 표는 설계속도 기준인데 우리가 가진 건 표준노드링크의 제한속도다.
+ * 통상 설계속도 ≥ 제한속도이므로 실제 기준보다 작은 임계값을 쓰게 된다 —
+ * 놓치는 쪽으로 틀리지, 없는 급커브를 만들어내지는 않는다.
+ *
+ * 표에 없는 값은 10km/h 단위로 맞춘다. 표준노드링크 MAX_SPD는 전부 10의 배수지만,
+ * 조용히 건너뛰면 그 구간의 급커브가 통째로 사라지므로 반올림으로 막는다.
+ */
+export const sharpRadiusFor = (speedKmh: number): number =>
+  MIN_CURVE_RADIUS[Math.min(120, Math.max(20, Math.round(speedKmh / 10) * 10))];
 
 /**
  * "굽은 구간"의 병합 간격. 급커브 사이 직선이 이보다 짧으면 하나의 연속 구간으로 본다.
@@ -50,8 +73,9 @@ export const WINDING_GAP = 500;
  * 좌표 개수를 그대로 세면 안 된다 — 길찾기 API는 곡선부에 좌표를 촘촘히 주므로
  * 개수가 커브의 수가 아니라 좌표 밀도를 반영해버린다.
  *
- * @param speedLimitAt 해당 좌표의 제한속도(km/h). 저속 도로의 교차로 회전을
- *        급커브로 세지 않기 위해 쓴다. 없으면 전부 대상.
+ * @param speedLimitAt 해당 좌표의 제한속도(km/h). 두 가지로 쓴다 —
+ *        저속 도로의 교차로 회전을 급커브로 세지 않는 필터, 그리고 급커브 임계값의 유도
+ *        (sharpRadiusFor 참고). 없으면 minSpeed 기준으로 판정한다.
  * @param mergeGapM 이 거리 안에 다음 급커브가 있으면 같은 구간으로 본다.
  *        작게 두면 "급커브 몇 곳"을, 크게 두면 "굽은 길이 몇 km"를 재게 된다.
  *        둘은 다른 질문이라 호출부에서 값을 달리 준다 (WINDING_GAP 참고).
@@ -67,10 +91,13 @@ export function sharpCurves(
   for (let i = 1; i + 1 < path.length; i++) {
     // 5m 미만 간격은 좌표 잡음이 곡률을 크게 왜곡한다
     if (distance(path[i - 1], path[i]) < 5 || distance(path[i], path[i + 1]) < 5) continue;
-    if (speedLimitAt && (speedLimitAt(i) ?? 0) < minSpeed) continue;
+    // 미매칭 좌표(null)는 제외한다 — 제한속도를 모르면 임계값을 유도할 수 없다.
+    // speedLimitAt 자체가 없는 경우(단위 테스트)와 구분해야 한다.
+    const spd = speedLimitAt ? speedLimitAt(i) : minSpeed;
+    if (spd == null || spd < minSpeed) continue;
 
     const r = curveRadius(path[i - 1], path[i], path[i + 1]);
-    if (r >= SHARP_RADIUS) continue;
+    if (r >= sharpRadiusFor(spd)) continue;
 
     const last = runs.at(-1);
     if (last && distance(last.end, path[i]) < mergeGapM) {

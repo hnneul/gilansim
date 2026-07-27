@@ -3,8 +3,10 @@
 // 경로 좌표·소요시간·위험요인 수치가 모두 실데이터다.
 // 생성 과정은 scripts/build-route-data.mjs 에 있고, 산출물은 data/route-data.json 이다.
 //   · 경로 좌표: 카카오모빌리티 길찾기 API 응답 vertexes (지도 표시용으로 30m 축약)
-//   · 급커브: 위 좌표의 곡률을 직접 계산 (급커브 구간을 공개하는 데이터셋이 없다)
+//   · 급커브: 위 좌표의 곡률을 직접 계산 (급커브 구간을 공개하는 데이터셋이 없다).
+//             판정 임계값은 규칙 제19조 최소 평면곡선반지름을 구간 제한속도로 유도한다.
 //   · 차로수·제한속도: 표준노드링크 2026-07-16 (국가교통정보센터)
+//   · 최밀집 지점 지명: 카카오 로컬 API 좌표→행정구역 변환 (지명 하드코딩 금지)
 //
 // 남은 미확보 요인 — 원칙에 따라 아예 넣지 않는다:
 //   · accidentZone : 공개 사고다발지역 데이터가 보행자·어린이·노인 유형뿐이라
@@ -26,7 +28,8 @@ import DATA from "@/data/route-data.json";
  */
 const 경로출처 = "카카오모빌리티 길찾기 API (2026-07-28 10:00 출발)";
 
-const 곡률출처 = "경로좌표 곡률 계산 (카카오모빌리티 길찾기 API) · 표준노드링크 2026-07-16 제한속도 50km/h↑ 구간";
+const 곡률출처 =
+  "경로좌표 곡률 계산 (카카오모빌리티 길찾기 API) · 임계값: 도로의 구조·시설 기준에 관한 규칙 제19조 최소 평면곡선반지름 · 표준노드링크 2026-07-16 제한속도 50km/h↑ 구간";
 const 노드링크출처 = "표준노드링크 2026-07-16 (국가교통정보센터)";
 
 /** PLAN.md §4 Route */
@@ -69,7 +72,7 @@ const FAST: Route = {
     {
       type: "sharpCurve",
       label: "5.16도로 연속 급커브",
-      location: `산천단~성판악 (5km 내 ${DATA.fast.sharpCurve.densest!.count}곳)`,
+      location: `${DATA.fast.sharpCurve.densest!.region} 일대 (5km 내 ${DATA.fast.sharpCurve.densest!.count}곳)`,
       coord: DATA.fast.sharpCurve.densest!.at as LatLng,
       value: `급커브 ${DATA.fast.sharpCurve.byRoad["516로"]}곳 (최소 반경 ${DATA.fast.sharpCurve.minRadiusM}m) · 굽은 구간 ${DATA.fast.sharpCurve.windingKm}km`,
       exposure: DATA.fast.sharpCurve.exposure,

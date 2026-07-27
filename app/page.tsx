@@ -3,6 +3,7 @@
 import { useState } from "react";
 import RouteMap from "./RouteMap";
 import { scoreRoutes, activeWeights, type DriverProfile } from "@/lib/score";
+import { briefing } from "@/lib/briefing";
 import { FAST, SAFE, MARKERS, MAP_CENTER, type Scenario } from "@/lib/scenario";
 
 const 초보: DriverProfile = {
@@ -153,6 +154,16 @@ export default function Home() {
             </ul>
           </div>
         ))}
+      </section>
+
+      {/* ④ 출발 전 브리핑 */}
+      <section className="rounded-2xl bg-emerald-50 p-4">
+        <h2 className="text-sm font-semibold">출발 전 브리핑</h2>
+        <div className="mt-2 flex flex-col gap-1.5 text-sm leading-relaxed text-slate-700">
+          {briefing(profile, result, { fast: FAST.name, safe: SAFE.name }).map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
       </section>
     </main>
   );

@@ -31,7 +31,13 @@ export type ScoreResult = {
   fastScore: number;
   safeScore: number;
   reasons: string[];
-  breakdown: { route: "fast" | "safe"; factor: string; base: number; weighted: number }[];
+  breakdown: {
+    route: "fast" | "safe";
+    risk: RiskFactor; // 위치·수치·출처를 근거 카드가 그대로 쓴다
+    base: number;
+    multiplier: number;
+    weighted: number;
+  }[];
 };
 
 export const BASE_SCORE: Record<RiskType, number> = {
@@ -61,14 +67,27 @@ function weight(type: RiskType, p: DriverProfile): number {
   return w;
 }
 
+/** 근거 카드 머리말용 — 지금 켜져 있는 가중치 조건 목록 */
+export function activeWeights(p: DriverProfile): string[] {
+  const out: string[] = [];
+  if (p.experienceYears <= 1) out.push("운전경력 1년 이하 ×1.3");
+  if (p.drivingFrequency === "low") out.push("최근 운전빈도 낮음 ×1.3");
+  if (!p.jejuExperience) out.push("제주 운전경험 없음 ×1.2");
+  if (p.timeOfDay === "night") out.push("야간 주행 ×1.15");
+  if (p.vehicleSize === "suv") out.push("SUV ×1.4 (좁은 교행로에만)");
+  return out;
+}
+
 const round1 = (n: number) => Math.round(n * 10) / 10;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function scoreRoute(risks: RiskFactor[], p: DriverProfile) {
   const rows = risks
     .filter((r) => applies(r.type, p))
     .map((r) => {
       const base = BASE_SCORE[r.type];
-      return { factor: r.label, base, weighted: round1(base * weight(r.type, p)) };
+      const m = weight(r.type, p);
+      return { risk: r, base, multiplier: round2(m), weighted: round1(base * m) };
     });
   // 합계는 반올림된 값들의 합 — 근거 카드의 숫자가 총점과 어긋나지 않게
   return { total: round1(rows.reduce((s, r) => s + r.weighted, 0)), rows };
@@ -97,7 +116,7 @@ export function scoreRoutes(
       : recommendedRoute === "safe"
         ? `빠른 경로 부담점수 ${fast.total} — 임계값 ${COMFORT_THRESHOLD} 초과`
         : `두 경로의 부담 차이가 작음 (${fast.total} / ${safe.total})`,
-    ...top.map((r) => `${r.factor} ${r.weighted}점`),
+    ...top.map((r) => `${r.risk.label} ${r.weighted}점`),
   ];
 
   return {

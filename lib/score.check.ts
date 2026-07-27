@@ -46,8 +46,8 @@ assert.equal(a.recommendedRoute, "safe", "초보에게는 저부담 경로를 �
 assert.equal(b.recommendedRoute, "fast", "베테랑에게는 빠른 경로를 추천해야 한다");
 
 // 고속주행은 초보에게만 적용된다
-assert.ok(a.breakdown.some((r) => r.factor === "고속주행 구간"));
-assert.ok(!b.breakdown.some((r) => r.factor === "고속주행 구간"));
+assert.ok(a.breakdown.some((r) => r.risk.label === "고속주행 구간"));
+assert.ok(!b.breakdown.some((r) => r.risk.label === "고속주행 구간"));
 
 // 근거 카드가 비지 않는다 (§3: 부담 요인 2개 이상)
 assert.ok(a.breakdown.filter((r) => r.route === "fast").length >= 2);

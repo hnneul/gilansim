@@ -82,6 +82,8 @@ for (const [이름, p] of Object.entries(프로필)) {
   }
   console.log("  요약:", out.summary);
   out.briefing.forEach((s, i) => console.log(`  ${i + 1}.`, s));
+  // 경로별 판정 — 근거 팝업 머리말. 어느 카드에 붙는 문장인지 이름과 함께 본다
+  out.verdicts.forEach((s, i) => console.log(`  [${경로[i].name}]`, s));
 }
 
 // 캐시가 실제로 호출을 막는가 — 무료 한도가 하루 단위라 이게 새면 시연 중에 폴백이 뜬다.

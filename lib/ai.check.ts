@@ -72,9 +72,62 @@ const 정상 = {
     "평화로 경유를 추천합니다. 5.16도로 경유는 부담점수 35.3점으로 부담이 더 큽니다.",
     "고속주행 구간이 부담이 큽니다. 주변 차가 빨라도 무리해서 속도를 맞출 필요는 없습니다.",
   ],
+  // 경로별 판정. 키는 사실에 실린 기호다 — facts.경로[0]=5.16도로(A), [1]=평화로(B).
+  verdicts: {
+    A: "굽은 길이 길게 이어져 커브마다 속도를 줄였다 올리기를 반복하게 됩니다.",
+    B: "이 길을 추천합니다. 넓은 길이라 차선을 지키기만 하면 됩니다.",
+  },
 };
 assert.ok(verify(정상, facts), "정상 응답이 걸러졌다");
 assert.equal(verify(정상, facts)!.briefing.length, 2);
+
+// --- ②-2 경로별 판정 (근거 팝업 머리말) ---
+// 기호로 받아 **경로 순서**로 펴야 한다. 여기가 어긋나면 평화로 카드에 5.16도로 설명이 붙는다.
+assert.deepEqual(verify(정상, facts)!.verdicts, [정상.verdicts.A, 정상.verdicts.B], "판정이 경로 순서로 안 펴졌다");
+
+// 장황한 판정은 버린다. 초보에게 하는 말이 이 길이가 되면 반드시 수치 나열로 흐르고,
+// 그건 바로 아래 요인 목록이 이미 하는 일이다. 아래 문장은 실제로 화면에 떴던 100자짜리다.
+assert.equal(
+  verify(
+    {
+      ...정상,
+      verdicts: {
+        ...정상.verdicts,
+        A: "고속주행 구간이 25.4km(제한속도 80km/h)이며 연속 급커브가 17곳(최소 반경 17m)·굽은 구간 2.5km으로, 속도를 무리 맞추지 않고 커브에 진입 전 속도를 줄이면 안전합니다.",
+      },
+    },
+    facts,
+  ),
+  null,
+  "수치를 나열한 장황한 판정이 통과했다",
+);
+// 60자 안쪽 평문은 통과한다 (프롬프트가 부탁하는 길이)
+assert.ok(
+  verify({ ...정상, verdicts: { ...정상.verdicts, A: "굽은 길이 계속 이어져서 커브마다 속도를 줄였다 올리게 됩니다." } }, facts),
+  "짧은 평문 판정이 걸러졌다",
+);
+
+// 한쪽이 없거나 비면 통째로 버린다 — 한 카드만 설명이 없는 화면보다 둘 다 규칙 문장이 낫다
+for (const bad of [{ A: 정상.verdicts.A }, { A: 정상.verdicts.A, B: "   " }, { A: 정상.verdicts.A, B: 42 }, {}])
+  assert.equal(verify({ ...정상, verdicts: bad }, facts), null, `걸러야 한다: ${JSON.stringify(bad)}`);
+
+// 판정에도 금지어·미확인 숫자 검증이 걸린다 (요약·브리핑과 같은 기준)
+assert.equal(verify({ ...정상, verdicts: { ...정상.verdicts, A: "사고다발 지점을 지납니다." } }, facts), null);
+assert.equal(verify({ ...정상, verdicts: { ...정상.verdicts, A: "급커브가 118곳 있습니다." } }, facts), null);
+assert.ok(verify({ ...정상, verdicts: { ...정상.verdicts, A: "급커브 42곳을 지납니다." } }, facts), "사실에 있는 숫자는 통과해야 한다");
+
+// 그 카드에 다른 길의 요인이 붙으면 버린다 — 기호로 순서는 막았지만 내용 뒤바뀜은 여기서만 걸린다.
+// 5.16도로(A)에는 고속주행 구간이 없다.
+assert.equal(
+  verify({ ...정상, verdicts: { ...정상.verdicts, A: "고속주행 구간이 이어집니다." } }, facts),
+  null,
+  "다른 경로의 요인이 판정에 통과했다",
+);
+assert.equal(
+  verify({ ...정상, verdicts: { ...정상.verdicts, B: "연속 급커브가 이어집니다." } }, facts),
+  null,
+  "다른 경로의 요인이 판정에 통과했다",
+);
 
 // --- ③ 확인되지 않은 요인을 말하면 버린다 (계획서 원칙) ---
 const 금지문장 = [
@@ -113,7 +166,17 @@ const 공통 = factsOf("테스트", 초보, result, [
   { ...경로[1], risks: [risk("narrowRoad", "좁은 교행 구간", 0.48)] },
 ]);
 assert.ok(
-  verify({ summary: "두 경로 모두 좁은 교행 구간이 있습니다.", briefing: ["평화로 경유를 추천합니다.", "좁은 교행 구간에서는 넓은 곳에서 기다렸다가 교행하세요."] }, 공통),
+  verify(
+    {
+      summary: "두 경로 모두 좁은 교행 구간이 있습니다.",
+      briefing: ["평화로 경유를 추천합니다.", "좁은 교행 구간에서는 넓은 곳에서 기다렸다가 교행하세요."],
+      verdicts: {
+        A: "좁은 교행 구간이 있어 마주 오는 차가 있으면 비켜서야 합니다.",
+        B: "이 길을 추천합니다. 좁은 교행 구간이 짧습니다.",
+      },
+    },
+    공통,
+  ),
   "양쪽에 공통인 요인은 브리핑에 쓸 수 있어야 한다",
 );
 // summary 에서 두 경로를 비교하는 건 막지 않는다 (Supporting 1 이 요구하는 일이다)
@@ -129,7 +192,9 @@ assert.equal(verify({ ...정상, briefing: ["가", "나", "다", "라"] }, facts
 assert.equal(verify({ ...정상, briefing: [정상.briefing[0], "  "] }, facts), null);
 
 // --- ⑥ 망가진 응답 ---
-for (const bad of [null, undefined, 42, "문자열", {}, { summary: "요약만" }, { briefing: ["가", "나"] }, { summary: "", briefing: ["가", "나"] }])
+for (const bad of [null, undefined, 42, "문자열", {}, { summary: "요약만" }, { briefing: ["가", "나"] }, { summary: "", briefing: ["가", "나"] },
+  // 판정 없이 온 응답 — 필드가 늘었으니 예전 모양은 더 이상 정상이 아니다
+  { summary: 정상.summary, briefing: 정상.briefing }])
   assert.equal(verify(bad, facts), null, `걸러야 한다: ${JSON.stringify(bad)}`);
 
 console.log("✅ AI 응답 검증기 정상");

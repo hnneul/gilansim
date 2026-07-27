@@ -10,6 +10,7 @@ import { briefing } from "@/lib/briefing";
 import { SCENARIOS, parkingFor, PARKING_SOURCE, type Route } from "@/lib/scenario";
 import { parallelOdds, recommendedSpots, type Parking } from "@/lib/parking";
 import { parseProfile } from "@/lib/profile";
+import { liveTraffic, congestionLabel, type Live } from "@/lib/traffic";
 
 export default async function ResultPage({
   searchParams,
@@ -222,7 +223,7 @@ function ParkingMap({ parking }: { parking: Parking }) {
   );
 }
 
-function Verified({
+async function Verified({
   routes,
   scenario,
   profile,
@@ -231,8 +232,22 @@ function Verified({
   scenario: (typeof SCENARIOS)[number];
   profile: DriverProfile;
 }) {
-  const [fast, safe] = routes;
-  // 요인 몇 개의 곱셈이라 매 렌더 재계산이 캐싱보다 싸다
+  const [verifiedFast, verifiedSafe] = routes;
+
+  // 실시간 교통. 소요시간만 갈아끼운다 — 경로 좌표와 위험요인은 검증된 값을 그대로 쓴다.
+  // 실패하면 null 이고, 그때는 굳혀둔 소요시간으로 떨어진다 (lib/traffic.ts).
+  const live = await liveTraffic(
+    scenario.markers[0].coord,
+    scenario.markers[scenario.markers.length - 1].coord,
+    { fast: verifiedFast.distanceKm, safe: verifiedSafe.distanceKm },
+  );
+  const withLive = (r: Route, l: Live | undefined): Route =>
+    l ? { ...r, durationMin: l.durationMin, distanceKm: l.distanceKm } : r;
+  const fast = withLive(verifiedFast, live?.fast);
+  const safe = withLive(verifiedSafe, live?.safe);
+
+  // 요인 몇 개의 곱셈이라 매 렌더 재계산이 캐싱보다 싸다.
+  // 실시간 소요시간이 들어오면 §5의 "최단거리가 시간까지 이득인가" 분기가 실제로 갈린다.
   const result = scoreRoutes(profile, fast, safe);
   const { recommendedRoute: pick, fastScore, safeScore } = result;
 
@@ -262,9 +277,19 @@ function Verified({
       <BelowMap>
         <section className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
-            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} />
-            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} />
+            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} live={live?.fast} />
+            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} live={live?.safe} />
           </div>
+
+          {/* 실시간 안내가 검증된 경로를 벗어나면 지도의 위험요인과 어긋난다 — 조용히 넘기지 않는다 */}
+          {live && (live.fast.drift || live.safe.drift) && (
+            <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+              지금{" "}
+              {[live.fast.drift && fast.name, live.safe.drift && safe.name].filter(Boolean).join(" · ")}
+              의 실시간 안내가 검증된 경로와 달라졌습니다 (사고·통제 가능성). 지도와 위험요인은 검증된
+              경로 기준이고, 소요시간만 실시간 값입니다.
+            </p>
+          )}
 
           {pick === "single" && (
             <p className="rounded-xl bg-slate-100 p-3 text-center text-sm text-slate-600">
@@ -325,7 +350,12 @@ function Verified({
           </div>
         </section>
 
-        <p className="text-xs text-slate-400">소요시간·거리·경로좌표 출처: {fast.durationSource}</p>
+        {/* 실시간과 굳힌 값이 섞여 있으니 어느 숫자가 어디서 왔는지 갈라 적는다 */}
+        <p className="text-xs text-slate-400">
+          {live
+            ? `소요시간·혼잡도: 카카오모빌리티 길찾기 API 실시간 교통 (${live.at} 조회) · 경로좌표: ${fast.durationSource}`
+            : `소요시간·거리·경로좌표 출처: ${fast.durationSource} — 실시간 교통 정보를 불러오지 못해 굳혀둔 값입니다`}
+        </p>
         <p className="text-xs text-slate-400">
           사고다발·급경사는 경로를 구분할 수 있는 데이터를 확보하지 못해 요인에서 제외했습니다.
         </p>
@@ -360,12 +390,16 @@ function RouteCard({
   score,
   recommended,
   result,
+  live,
 }: {
   r: Route;
   score: number;
   recommended: boolean;
   result: ReturnType<typeof scoreRoutes>;
+  /** 실시간 교통. 없으면(조회 실패) 혼잡 줄을 아예 그리지 않는다 — 모르는 걸 "원활"로 쓰지 않는다. */
+  live?: Live;
 }) {
+  const 혼잡 = live && congestionLabel(live.congestion);
   return (
     <div
       className={`rounded-2xl p-4 ${recommended ? "bg-emerald-50 ring-2 ring-emerald-300" : "bg-slate-50"}`}
@@ -380,6 +414,15 @@ function RouteCard({
           ? `${r.durationMin}분 · ${r.distanceKm}km`
           : "소요시간·거리 확인 중"}
       </div>
+      {live && (
+        <div
+          className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${
+            혼잡 ? "bg-rose-100 text-rose-700" : "bg-slate-200 text-slate-600"
+          }`}
+        >
+          {혼잡 ? `지금 ${혼잡}` : "지금 원활"}
+        </div>
+      )}
       <div className="mt-1 flex items-baseline gap-1.5">
         <span className="text-3xl font-bold tabular-nums">{score}</span>
         <span className="text-xs text-slate-500">부담점수</span>

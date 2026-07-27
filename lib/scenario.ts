@@ -27,6 +27,9 @@ import PARKING from "@/data/parking-data.json";
  *   5.16도로 43.0km / 64분   ← 최단거리(priority=DISTANCE). 하지만 5분 더 걸린다
  *   평화로   53.1km / 59분   ← 최단시간(priority=TIME)
  * 즉 5.16도로는 "빠른 경로"가 아니라 "내비가 최단거리로 안내하는 경로"다.
+ *
+ * 단, 여기 굳힌 durationMin 은 폴백이다 — 화면에는 lib/traffic.ts 가 조회한 실시간
+ * 소요시간이 오고, 조회에 실패할 때만 이 값이 쓰인다. 거리·경로좌표·위험요인은 항상 이 값이다.
  */
 const 경로출처 = "카카오모빌리티 길찾기 API (2026-07-28 10:00 출발)";
 

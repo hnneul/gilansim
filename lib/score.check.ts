@@ -55,6 +55,28 @@ assert.equal(b.recommendedRoute, "safe", "시간 이득이 없으면 베테랑�
 // 부담점수는 프로필에 따라 크게 달라진다 (PDF Core 완료 기준)
 assert.ok(a.fastScore > b.fastScore * 1.5, "초보의 부담점수가 베테랑보다 뚜렷이 높아야 한다");
 
+// --- 실시간 교통이 뒤집는 경우 ---
+// 굳힌 값에서는 최단거리 경로가 항상 더 느려서 위 분기만 돌았다. lib/traffic.ts 가
+// 실시간 소요시간을 넣기 시작하면(평화로에 사고·정체) 아래 분기가 처음으로 갈린다.
+// 여기가 §5 추천 규칙의 "시간을 얻는 대신 부담을 감수한다"는 교환이 실제로 계산되는 자리다.
+const 정체난저부담 = { risks: SAFE, durationMin: 85 }; // 평화로가 막혀 5.16도로보다 5분 느려짐
+
+const c = scoreRoutes(초보, 빠른경로, 정체난저부담);
+const d = scoreRoutes(베테랑, 빠른경로, 정체난저부담);
+console.log("실시간 역전 — 초보  ", c.recommendedRoute, `fast=${c.fastScore} safe=${c.safeScore}`);
+console.log("실시간 역전 — 베테랑", d.recommendedRoute, `fast=${d.fastScore} safe=${d.safeScore}`);
+
+// 초보: 시간 이득이 생겨도 부담점수가 임계값을 넘고 저부담 쪽이 30% 이상 낮으므로 저부담 유지.
+// 추천은 그대로여도 이유가 "시간 이득 없음"에서 "부담 차이가 커서"로 바뀐다 — 브리핑이 달라진다.
+assert.equal(c.recommendedRoute, "safe", "초보는 시간 이득보다 부담 차이가 크면 저부담 경로다");
+assert.ok(
+  !c.reasons[0].includes("시간 이득이 없음"),
+  `실시간 역전 시 추천 이유가 바뀌어야 한다: ${c.reasons[0]}`,
+);
+
+// 베테랑: 부담점수가 임계값 이하라 시간 이득이 생기면 최단거리 경로로 넘어간다
+assert.equal(d.recommendedRoute, "fast", "베테랑은 부담이 임계값 이하면 빠른 쪽을 추천한다");
+
 // 고속주행은 경력이 쌓이면 부담이 크게 줄지만 요인 자체는 남는다.
 // 요인을 제거해버리면 베테랑의 근거 카드가 한 줄로 비어 완료 기준(2개 이상)에 미달했다.
 const 초보고속 = a.breakdown.find((r) => r.factor === "고속주행 구간");

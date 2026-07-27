@@ -23,6 +23,12 @@ export type RiskFactor = {
   location: string;
   coord: [number, number];
   value: string;
+  /**
+   * 이 요인이 경로에서 차지하는 비율 (0~1).
+   * 부담은 노출 길이에 비례한다 — 좁은 길 13.1km와 1.6km가 같은 점수가 되면 안 된다.
+   * 요인마다 단위가 다르면(개수 vs km) 비교가 불가능하므로 전부 연장 비율로 통일한다.
+   */
+  exposure: number;
   source: string; // ★ 필수 — 출처 없으면 데이터에 못 들어감
 };
 
@@ -33,9 +39,19 @@ export type ScoreResult = {
   reasons: string[];
   // PLAN.md §4 그대로. factor는 RiskFactor.label이며,
   // 근거 카드는 이 이름으로 Route.risks를 되짚어 위치·수치·출처를 가져온다.
-  breakdown: { route: "fast" | "safe"; factor: string; base: number; weighted: number }[];
+  // 점수는 기본 × 노출 × 프로필 세 요소의 곱이므로 셋을 따로 담는다 —
+  // weighted 하나만 주면 근거 카드가 곱셈식을 복원할 수 없다.
+  breakdown: {
+    route: "fast" | "safe";
+    factor: string;
+    base: number;
+    exposure: number; // 노출 배수 (기준 노출 대비)
+    multiplier: number; // 프로필 가중치
+    weighted: number;
+  }[];
 };
 
+/** 기준 노출(20%)에서의 점수. 실제 노출이 그보다 크면 점수도 커진다. */
 export const BASE_SCORE: Record<RiskType, number> = {
   accidentZone: 15,
   sharpCurve: 12,
@@ -46,6 +62,18 @@ export const BASE_SCORE: Record<RiskType, number> = {
 };
 
 export const COMFORT_THRESHOLD = 50;
+
+/**
+ * 노출 비율 20%를 기준 1.0으로 본다.
+ * 상·하한을 두는 이유: 노출 2%짜리 요인이 0.1배로 사라지면 근거 카드에서 없는 것처럼 보이고,
+ * 반대로 100% 노출이 5배가 되면 한 요인이 총점을 독점한다.
+ */
+export const EXPOSURE_REFERENCE = 0.2;
+const EXPOSURE_MIN = 0.25;
+const EXPOSURE_MAX = 2.5;
+
+export const exposureFactor = (exposure: number) =>
+  Math.min(EXPOSURE_MAX, Math.max(EXPOSURE_MIN, exposure / EXPOSURE_REFERENCE));
 
 /** 고속주행은 초보에게만 부담이다 — 경력이 쌓이면 요인 자체가 사라진다 */
 function applies(type: RiskType, p: DriverProfile): boolean {
@@ -75,17 +103,16 @@ export function activeWeights(p: DriverProfile): string[] {
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
-
-/** 근거 카드가 "기본 15 × 2.03" 곱셈식을 복원할 때 쓴다 */
-export const multiplierOf = (base: number, weighted: number) =>
-  Math.round((weighted / base) * 100) / 100;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function scoreRoute(risks: RiskFactor[], p: DriverProfile) {
   const rows = risks
     .filter((r) => applies(r.type, p))
     .map((r) => {
       const base = BASE_SCORE[r.type];
-      return { factor: r.label, base, weighted: round1(base * weight(r.type, p)) };
+      const exposure = round2(exposureFactor(r.exposure));
+      const multiplier = round2(weight(r.type, p));
+      return { factor: r.label, base, exposure, multiplier, weighted: round1(base * exposure * multiplier) };
     });
   // 합계는 반올림된 값들의 합 — 근거 카드의 숫자가 총점과 어긋나지 않게
   return { total: round1(rows.reduce((s, r) => s + r.weighted, 0)), rows };

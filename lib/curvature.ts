@@ -48,8 +48,8 @@ export function sharpCurves(
   path: LatLng[],
   speedLimitAt?: (i: number) => number | null,
   minSpeed = 50,
-): { start: LatLng; count: number; minRadius: number }[] {
-  const runs: { start: LatLng; end: LatLng; count: number; minRadius: number }[] = [];
+): { start: LatLng; count: number; minRadius: number; lengthM: number }[] {
+  const runs: { start: LatLng; end: LatLng; from: number; to: number; count: number; minRadius: number }[] = [];
 
   for (let i = 1; i + 1 < path.length; i++) {
     // 5m 미만 간격은 좌표 잡음이 곡률을 크게 왜곡한다
@@ -62,14 +62,22 @@ export function sharpCurves(
     const last = runs.at(-1);
     if (last && distance(last.end, path[i]) < 100) {
       last.end = path[i];
+      last.to = i;
       last.count++;
       last.minRadius = Math.min(last.minRadius, r);
     } else {
-      runs.push({ start: path[i], end: path[i], count: 1, minRadius: r });
+      runs.push({ start: path[i], end: path[i], from: i, to: i, count: 1, minRadius: r });
     }
   }
 
-  return runs.map(({ start, count, minRadius }) => ({ start, count, minRadius }));
+  // 구간 연장은 곡률을 만든 좌표 삼중항 전체를 포함한다 (from-1 ~ to+1).
+  // 개수만으로는 부담을 못 잰다 — 노출 길이가 있어야 다른 요인과 같은 단위가 된다.
+  return runs.map(({ start, count, minRadius, from, to }) => {
+    let lengthM = 0;
+    for (let i = Math.max(0, from - 1); i < Math.min(path.length - 1, to + 1); i++)
+      lengthM += distance(path[i], path[i + 1]);
+    return { start, count, minRadius, lengthM };
+  });
 }
 
 /** 급커브가 가장 밀집한 지점과 그 반경 안의 구간 수 — 근거 카드의 "위치"가 된다 */

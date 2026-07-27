@@ -36,6 +36,9 @@ const 병합 = sharpCurves(원호);
 assert.equal(병합.length, 1, `연속 급커브가 병합되지 않음: ${병합.length}개`);
 assert.ok(병합[0].count > 5);
 assert.ok(병합[0].minRadius < 100);
+// 반지름 50m, 15°씩 12점 = 165° 호. 현 길이 11개 × 13.05m ≈ 144m.
+// 구간 연장이 점수의 입력이므로 크기를 지킨다.
+assert.ok(병합[0].lengthM > 130 && 병합[0].lengthM < 160, `구간 연장 이상: ${병합[0].lengthM.toFixed(0)}m`);
 
 // 직선은 급커브가 없다
 const 직선 = Array.from({ length: 20 }, (_, i): LatLng => [33.4 + i * 0.001, 126.5]);
@@ -79,6 +82,21 @@ assert.ok(fast.narrow.km > safe.narrow.km * 5);
 // 링크 매칭이 대부분 성공해야 수치를 믿을 수 있다
 for (const [id, o] of Object.entries({ fast, safe }))
   assert.ok(o.matchedKm / (o.matchedKm + o.unmatchedKm) > 0.95, `${id} 링크 매칭률 미달`);
+
+// --- 노출 비율 (점수 엔진의 입력) ---
+for (const [id, o] of Object.entries({ fast, safe }))
+  for (const [name, e] of Object.entries({
+    sharpCurve: o.sharpCurve.exposure,
+    narrow: o.narrow.exposure,
+    highSpeed: o.highSpeed.exposure,
+  }))
+    assert.ok(e >= 0 && e <= 1, `${id}.${name} 노출이 0~1 밖: ${e}`);
+
+// 노출이 두 경로를 실제로 가른다 — 이게 무너지면 점수가 다시 같아진다
+assert.ok(fast.narrow.exposure > safe.narrow.exposure * 5, "좁은 길 노출 차이 소실");
+assert.ok(fast.sharpCurve.exposure > safe.sharpCurve.exposure * 3, "급커브 노출 차이 소실");
+assert.ok(safe.highSpeed.exposure > 0.4, "평화로 고속주행 노출 축소");
+assert.equal(fast.highSpeed.exposure, 0);
 
 console.log(
   [

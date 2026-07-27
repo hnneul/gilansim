@@ -578,6 +578,8 @@
   "unmatchedKm": 1,
   "sharpCurve": {
    "sections": 57,
+   "km": 5.5,
+   "exposure": 0.128,
    "perKm": 1.32,
    "minRadiusM": 7,
    "byRoad": {
@@ -599,6 +601,7 @@
   },
   "narrow": {
    "km": 13.1,
+   "exposure": 0.305,
    "byRoad": {
     "516로": 11.9,
     "장수로": 0.5,
@@ -622,6 +625,7 @@
   },
   "highSpeed": {
    "km": 0,
+   "exposure": 0,
    "byRoad": {},
    "at": null
   },
@@ -947,6 +951,8 @@
   "unmatchedKm": 0.8,
   "sharpCurve": {
    "sections": 10,
+   "km": 0.9,
+   "exposure": 0.017,
    "perKm": 0.19,
    "minRadiusM": 14,
    "byRoad": {
@@ -967,6 +973,7 @@
   },
   "narrow": {
    "km": 1.6,
+   "exposure": 0.031,
    "byRoad": {
     "평화로": 1.1,
     "산록서로": 0.1,
@@ -987,6 +994,7 @@
   },
   "highSpeed": {
    "km": 25.4,
+   "exposure": 0.484,
    "byRoad": {
     "평화로": 17.4,
     "중산간서로": 6.7,

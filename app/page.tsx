@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import RouteMap from "./RouteMap";
-import { scoreRoutes, activeWeights, multiplierOf, type DriverProfile, type RiskFactor } from "@/lib/score";
+import { scoreRoutes, activeWeights, type DriverProfile, type RiskFactor } from "@/lib/score";
 import { briefing } from "@/lib/briefing";
 import { SCENARIOS, type Route } from "@/lib/scenario";
 
@@ -181,7 +181,7 @@ function Verified({
               </span>
             </div>
             <ul className="mt-3 flex flex-col gap-3">
-              {rowsOf(result, r).map(({ risk, base, weighted }) => (
+              {rowsOf(result, r).map(({ risk, base, exposure, multiplier, weighted }) => (
                 <li key={risk.label} className="text-xs">
                   <div className="flex justify-between gap-2 text-slate-800">
                     <span className="font-medium">{risk.label}</span>
@@ -189,9 +189,12 @@ function Verified({
                   </div>
                   <div className="mt-0.5 flex justify-between gap-2 text-slate-500">
                     <span className="tabular-nums">
-                      {risk.value} · 기본 {base} × {multiplierOf(base, weighted)}
+                      {risk.value} · 경로의 {Math.round(risk.exposure * 100)}%
                     </span>
                     <span className="shrink-0 font-semibold tabular-nums text-slate-700">{weighted}점</span>
+                  </div>
+                  <div className="mt-0.5 text-[11px] tabular-nums text-slate-400">
+                    기본 {base} × 노출 {exposure} × 조건 {multiplier}
                   </div>
                   <div className="mt-0.5 text-[11px] text-amber-600">{risk.source}</div>
                 </li>

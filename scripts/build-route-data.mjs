@@ -163,13 +163,26 @@ for (const [id, priority] of [["fast", "DISTANCE"], ["safe", "TIME"]]) {
     unmatchedKm: +unmatched.toFixed(1),
     sharpCurve: {
       sections: curves.length,
+      km: +(curves.reduce((s, c) => s + c.lengthM, 0) / 1000).toFixed(1),
+      // 노출 비율 — 요인마다 단위가 달라지면 점수에 크기를 반영할 수 없다
+      exposure: +(curves.reduce((s, c) => s + c.lengthM, 0) / route.summary.distance).toFixed(3),
       perKm: +(curves.length / (route.summary.distance / 1000)).toFixed(2),
       minRadiusM: curves.length ? Math.round(Math.min(...curves.map((c) => c.minRadius))) : null,
       byRoad: Object.fromEntries(Object.entries(curveByRoad).sort((a, b) => b[1] - a[1])),
       densest: cluster && { at: cluster.at.map((x) => +x.toFixed(4)), count: cluster.count },
     },
-    narrow: { km: +sum(spots.narrow).toFixed(1), byRoad: byRoad(spots.narrow), at: midOf(spots.narrow) },
-    highSpeed: { km: +sum(spots.fast).toFixed(1), byRoad: byRoad(spots.fast), at: midOf(spots.fast) },
+    narrow: {
+      km: +sum(spots.narrow).toFixed(1),
+      exposure: +((sum(spots.narrow) * 1000) / route.summary.distance).toFixed(3),
+      byRoad: byRoad(spots.narrow),
+      at: midOf(spots.narrow),
+    },
+    highSpeed: {
+      km: +sum(spots.fast).toFixed(1),
+      exposure: +((sum(spots.fast) * 1000) / route.summary.distance).toFixed(3),
+      byRoad: byRoad(spots.fast),
+      at: midOf(spots.fast),
+    },
     lanesKm: Object.fromEntries(Object.entries(byLanes).map(([k, v]) => [k, +v.toFixed(1)])),
     speedKm: Object.fromEntries(Object.entries(bySpd).map(([k, v]) => [k, +v.toFixed(1)])),
   };
@@ -177,10 +190,11 @@ for (const [id, priority] of [["fast", "DISTANCE"], ["safe", "TIME"]]) {
   const o = out[id];
   console.log(`\n=== ${id} (${priority}) ${o.distanceKm}km / ${o.durationMin}분 ===`);
   console.log(`좌표 ${o.vertexCount}개 → 표시용 ${o.path.length}개 | 매칭 ${o.matchedKm}km, 미매칭 ${o.unmatchedKm}km`);
-  console.log(`급커브 구간 ${o.sharpCurve.sections}개 (${o.sharpCurve.perKm}/km, 최소 R=${o.sharpCurve.minRadiusM}m)`, o.sharpCurve.byRoad);
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  console.log(`급커브 ${o.sharpCurve.sections}구간 / ${o.sharpCurve.km}km (노출 ${pct(o.sharpCurve.exposure)}, 최소 R=${o.sharpCurve.minRadiusM}m)`, o.sharpCurve.byRoad);
   console.log(`  최밀집: 5km 내 ${o.sharpCurve.densest?.count}개 @${o.sharpCurve.densest?.at}`);
-  console.log(`차로수1&50↑: ${o.narrow.km}km`, o.narrow.byRoad);
-  console.log(`제한속도80↑: ${o.highSpeed.km}km`, o.highSpeed.byRoad);
+  console.log(`차로수1&50↑: ${o.narrow.km}km (노출 ${pct(o.narrow.exposure)})`, o.narrow.byRoad);
+  console.log(`제한속도80↑: ${o.highSpeed.km}km (노출 ${pct(o.highSpeed.exposure)})`, o.highSpeed.byRoad);
 }
 
 writeFileSync(`${DATA}route-data.json`, JSON.stringify(out, null, 1));

@@ -5,12 +5,14 @@ import assert from "node:assert";
 import { scoreRoutes, type DriverProfile, type RiskFactor } from "./score.ts";
 import { briefing } from "./briefing.ts";
 
-const dummy = (type: RiskFactor["type"], label: string): RiskFactor => ({
+/** exposure를 안 주면 기준 노출(20%)로 둔다 — 노출 배수 1.0이라 기존 기대값과 비교하기 쉽다 */
+const dummy = (type: RiskFactor["type"], label: string, exposure = 0.2): RiskFactor => ({
   type,
   label,
   location: "-",
   coord: [0, 0],
   value: "-",
+  exposure,
   source: "검증용 더미 (실데이터 아님)",
 });
 
@@ -62,6 +64,24 @@ assert.ok(a.breakdown.filter((r) => r.route === "fast").length >= 2);
 
 // 결정론적: 같은 입력이면 같은 출력
 assert.deepEqual(scoreRoutes(초보, 빠른경로, 저부담경로), a);
+
+// --- 노출 크기 반영 ---
+// 같은 종류의 요인이라도 노출이 길면 점수가 커야 한다.
+// 실데이터에서 좁은 길 13.1km(31%)와 1.6km(3%)가 똑같이 28.4점으로 나왔던 버그의 회귀 방지.
+const 긴좁은길 = { risks: [dummy("narrowRoad", "좁은 교행", 0.31)], durationMin: 80 };
+const 짧은좁은길 = { risks: [dummy("narrowRoad", "좁은 교행", 0.03)], durationMin: 71 };
+const 노출 = scoreRoutes(초보, 긴좁은길, 짧은좁은길);
+assert.ok(
+  노출.fastScore > 노출.safeScore * 3,
+  `노출 차이가 점수에 반영되지 않음: ${노출.fastScore} vs ${노출.safeScore}`,
+);
+
+// 근거 카드가 곱셈식을 복원할 수 있어야 한다 (기본 × 노출 × 조건 = 점수)
+for (const row of a.breakdown) {
+  const 복원 = Math.round(row.base * row.exposure * row.multiplier * 10) / 10;
+  assert.equal(복원, row.weighted, `${row.factor} 곱셈식 불일치: ${복원} ≠ ${row.weighted}`);
+  assert.ok(row.exposure > 0 && row.multiplier > 0);
+}
 
 // --- 브리핑 (폴백) ---
 

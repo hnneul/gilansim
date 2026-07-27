@@ -15,8 +15,14 @@ import type { LatLng } from "@/app/RouteMap";
 
 const ENDPOINT = "https://apis-navi.kakaomobility.com/v1/directions";
 
-/** 응답을 기다리는 한계. 넘기면 굳혀둔 값으로 떨어진다 — 페이지가 멈추는 게 더 나쁘다. */
-const TIMEOUT_MS = 4000;
+/**
+ * 응답을 기다리는 한계. 넘기면 굳혀둔 값으로 떨어진다 — 페이지가 멈추는 게 더 나쁘다.
+ *
+ * 실측 호출당 0.7~2.8초다 (road_details=true 라 응답에 좌표열이 다 실려 온다).
+ * 처음 4초로 뒀다가 화면이 폴백으로 떨어지는 걸 봤다 — 최댓값의 1.4배는 여유가 아니다.
+ * 이 대기는 페이지 렌더를 막으므로 무한정 늘릴 수도 없다. 2배 남기고 끊는다.
+ */
+const TIMEOUT_MS = 6000;
 
 /** 실시간 거리가 검증된 거리와 이만큼 벌어지면 다른 길로 안내된 것으로 본다. */
 const DRIFT_RATIO = 0.05;

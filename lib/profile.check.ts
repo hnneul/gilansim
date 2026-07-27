@@ -2,15 +2,12 @@
 // URL은 사용자가 고칠 수 있는 입력이다. 여기가 새면 점수가 조용히 틀린 프로필로 계산된다.
 
 import assert from "node:assert";
-import { parseProfile, toQuery, PRESETS, DEFAULT_PROFILE, OPTIONS } from "./profile.ts";
+import { parseProfile, toQuery, DEFAULT_PROFILE, OPTIONS } from "./profile.ts";
 
 /** toQuery 결과를 다시 parseProfile 입력 형태로 되돌린다 */
 const roundTrip = (q: string) => parseProfile(Object.fromEntries(new URLSearchParams(q)));
 
 // --- 왕복 ---
-for (const [name, { profile }] of Object.entries(PRESETS))
-  assert.deepEqual(roundTrip(toQuery(profile, "seogwipo")), profile, `${name} 왕복 실패`);
-
 // 모든 선택지 조합이 왕복을 견딘다 — 하나라도 새면 그 조합의 점수가 틀린다
 for (const exp of OPTIONS.experienceYears)
   for (const freq of OPTIONS.drivingFrequency)

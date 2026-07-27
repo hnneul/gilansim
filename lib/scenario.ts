@@ -158,22 +158,6 @@ export function goodpriceAt(label: string, at: LatLng): Goodprice | null {
   return nearbyGoodprice(label, at, GOODPRICE.shops as unknown as Shop[], GOODPRICE.radiusM);
 }
 
-/** 굳혀둔 구간용 지름길 — 도착 마커의 좌표·이름을 그대로 쓴다. */
-const 도착 = (id: string) => {
-  const s = SCENARIOS.find((x) => x.id === id);
-  return s ? s.markers[s.markers.length - 1] : null;
-};
-
-export function parkingFor(scenarioId: string): Parking | null {
-  const d = 도착(scenarioId);
-  return d ? parkingAt(d.label, d.coord) : null;
-}
-
-export function goodpriceFor(scenarioId: string): Goodprice | null {
-  const d = 도착(scenarioId);
-  return d ? goodpriceAt(d.label, d.coord) : null;
-}
-
 export const SCENARIOS: Scenario[] = [
   {
     id: "seogwipo",

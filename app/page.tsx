@@ -4,22 +4,53 @@
 // 여기서 고른 값은 URL 쿼리로 넘어가므로(lib/profile.ts) 결과 링크를 그대로 공유할 수 있다.
 //
 // 선택지가 전부 2~3개라 드롭다운 대신 칩을 쓴다 — 한눈에 보이고 탭 한 번에 끝난다.
-// 선택 색은 프리셋 버튼과 같은 slate-800이다. 주황은 5.16도로 경로 색이라 여기 쓰면 의미가 겹친다.
+// 다섯 줄 전부 탭 한 번씩이라 프리셋("한 번에 채우기") 같은 단축은 두지 않는다.
+// 기본값이 선택된 것처럼 보이면 사용자가 칩을 안 건드리고 넘어가, 자기 값이 아닌 프로필로 점수가 나온다.
+// 선택 색은 slate-800이다. 주황은 5.16도로 경로 색이라 여기 쓰면 의미가 겹친다.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { type DriverProfile } from "@/lib/score";
-import { SCENARIOS } from "@/lib/scenario";
-import { PRESETS, DEFAULT_PROFILE, toQuery } from "@/lib/profile";
+import { DEFAULT_PROFILE, toCustomQuery } from "@/lib/profile";
 
 export default function Home() {
   const router = useRouter();
-  const [scenarioId, setScenarioId] = useState(SCENARIOS[0].id);
+  const [origin, setOrigin] = useState("");
+  const [destination, setDestination] = useState("");
   const [profile, setProfile] = useState<DriverProfile>(DEFAULT_PROFILE);
+  const [locating, setLocating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof DriverProfile>(k: K, v: DriverProfile[K]) =>
     setProfile({ ...profile, [k]: v });
 
-  const same = (p: DriverProfile) => JSON.stringify(p) === JSON.stringify(profile);
+  // 출발지를 직접 적으면 그 지명을 그대로 쓴다 — "제주공항 → 성산일출봉"처럼 특정 구간을
+  // 재현하고 싶을 때 GPS로는 그 자리에 가야만 하니, 비워두면 GPS로 대신한다.
+  function submit() {
+    if (!destination.trim()) return setError("목적지를 입력해주세요");
+
+    if (origin.trim()) {
+      router.push(`/result${toCustomQuery(profile, origin.trim(), destination.trim())}`);
+      return;
+    }
+    if (!("geolocation" in navigator)) return setError("이 브라우저는 위치 확인을 지원하지 않습니다");
+
+    setError(null);
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        router.push(`/result${toCustomQuery(profile, [coords.latitude, coords.longitude], destination.trim())}`);
+      },
+      (err) => {
+        setLocating(false);
+        setError(
+          err.code === err.PERMISSION_DENIED
+            ? "위치 권한이 거부되었습니다. 브라우저 설정에서 위치 접근을 허용해주세요."
+            : "현재 위치를 확인할 수 없습니다. 다시 시도해주세요.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 8000 },
+    );
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 p-5 text-slate-800">
@@ -38,29 +69,25 @@ export default function Home() {
         </div>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-semibold">구간</span>
-          <select
-            value={scenarioId}
-            onChange={(e) => setScenarioId(e.target.value)}
+          <span className="text-sm font-semibold">목적지</span>
+          <input
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            placeholder="예: 성산일출봉, 협재해수욕장"
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800"
-          >
-            {SCENARIOS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
+          />
         </label>
 
-        {/* 프리셋은 아래 칩들을 한 번에 채우는 단축키다. 칩보다 먼저 보여야 단축이 된다. */}
-        <div>
-          <span className="text-sm font-semibold">한 번에 채우기</span>
-          <div className="mt-1.5 grid grid-cols-2 gap-2">
-            {Object.entries(PRESETS).map(([key, { label, sub, profile: p }]) => (
-              <Preset key={key} label={label} sub={sub} on={same(p)} onClick={() => setProfile(p)} />
-            ))}
-          </div>
-        </div>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-semibold">출발지 (선택)</span>
+          <input
+            value={origin}
+            onChange={(e) => setOrigin(e.target.value)}
+            placeholder="예: 제주국제공항"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800"
+          />
+          <span className="text-xs text-slate-400">비워두면 현재 위치(GPS)로 자동으로 잡습니다.</span>
+        </label>
 
         <Chips
           label="운전 경력"
@@ -122,11 +149,14 @@ export default function Home() {
 
       </section>
 
+      {error && <p className="text-sm text-rose-600">{error}</p>}
+
       <button
-        onClick={() => router.push(`/result${toQuery(profile, scenarioId)}`)}
-        className="rounded-2xl bg-slate-800 px-4 py-3.5 text-base font-semibold text-white transition hover:bg-slate-700"
+        onClick={submit}
+        disabled={locating}
+        className="rounded-2xl bg-slate-800 px-4 py-3.5 text-base font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60"
       >
-        경로 비교 보기
+        {locating ? "현재 위치 확인 중…" : "경로 비교 보기"}
       </button>
 
       <p className="text-xs text-slate-400">
@@ -186,20 +216,5 @@ function Chips<T extends string | number | boolean>({
         ))}
       </div>
     </div>
-  );
-}
-
-function Preset({ label, sub, on, onClick }: { label: string; sub: string; on: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={on}
-      className={`rounded-xl px-3 py-2.5 text-left transition ${
-        on ? "bg-slate-800 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-      }`}
-    >
-      <div className="text-sm font-semibold">{label}</div>
-      <div className={`text-xs ${on ? "text-slate-300" : "text-slate-400"}`}>{sub}</div>
-    </button>
   );
 }

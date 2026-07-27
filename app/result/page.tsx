@@ -3,24 +3,37 @@
 // Next 16에서 searchParams는 Promise다 — await 없이 접근하면 못 쓴다.
 // 점수 계산은 순수 함수라 서버에서 그대로 돌아간다. 클라이언트 몫은 지도와 프리셋 버튼뿐이다.
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { Suspense } from "react";
 import Link from "next/link";
-import RouteMap, { type MarkerIcon } from "../RouteMap";
+import RouteMap, { type MarkerIcon, type LatLng } from "../RouteMap";
+import ProfileMenu from "../ProfileMenu";
+import RiskDialog from "../RiskDialog";
 import { aiSentences, factsOf, type AiSentences } from "@/lib/ai";
 import { scoreRoutes, activeWeights, isNovice, type RiskFactor, type DriverProfile } from "@/lib/score";
-import { briefing } from "@/lib/briefing";
+import { briefing, verdict, WHY } from "@/lib/briefing";
 import {
   SCENARIOS,
-  parkingFor,
+  parkingAt,
   PARKING_SOURCE,
-  goodpriceFor,
+  goodpriceAt,
   GOODPRICE_SOURCE,
   type Route,
 } from "@/lib/scenario";
 import { parallelOdds, recommendedSpots, nearestSpots, type Parking, type ParallelOdds } from "@/lib/parking";
 import { type Goodprice } from "@/lib/goodprice";
-import { parseProfile } from "@/lib/profile";
+import { parseProfile, oneOf } from "@/lib/profile";
 import { liveTraffic, congestionLabel, type Live } from "@/lib/traffic";
+import { geocodePlace } from "@/lib/geocode";
+import { routesFor, type LiveRoute, type LiveRoutes } from "@/lib/route";
+import type { Link as RoadLink } from "@/lib/analyze";
+
+/** 표준노드링크 5.9MB — 요청마다 다시 읽지 않게 모듈 전역에 캐시한다 (lib/analyze.ts 참고). */
+let links: RoadLink[] | null = null;
+function loadLinks(): RoadLink[] {
+  return (links ??= JSON.parse(readFileSync(path.join(process.cwd(), "data/jeju-link.json"), "utf8")));
+}
 
 export default async function ResultPage({
   searchParams,
@@ -29,6 +42,12 @@ export default async function ResultPage({
 }) {
   const sp = await searchParams;
   const profile = parseProfile(sp);
+
+  // 목적지 텍스트가 있으면 임의 구간(GPS 출발지 + 지오코딩 목적지) 흐름이다 —
+  // 굳혀둔 3구간과 완전히 다른 데이터 경로라 여기서 갈라 처리한다.
+  const destQuery = oneOf(sp, "dest");
+  if (destQuery) return <CustomPage sp={sp} destQuery={destQuery} profile={profile} />;
+
   // 없는 구간 id가 들어와도 첫 구간으로 떨어진다 — URL은 사용자가 고칠 수 있는 입력이다
   const scenario = SCENARIOS.find((s) => s.id === sp.route) ?? SCENARIOS[0];
 
@@ -39,16 +58,21 @@ export default async function ResultPage({
           <h1 className="text-2xl font-bold">길 안심 제주</h1>
           <p className="text-sm text-slate-500">{scenario.label}</p>
         </div>
-        <Link href="/" className="ml-auto shrink-0 text-sm text-slate-500 underline hover:text-slate-800">
-          프로필 다시 입력
-        </Link>
+        <ProfileMenu profile={profile} />
       </header>
 
       {scenario.routes ? (
         <Verified routes={scenario.routes} scenario={scenario} profile={profile} />
       ) : (
         <>
-          <MapArea scenario={scenario} profile={profile} routes={[]} markers={scenario.markers} />
+          <MapArea
+            center={scenario.center}
+            level={scenario.level}
+            destination={scenario.markers[scenario.markers.length - 1]}
+            profile={profile}
+            routes={[]}
+            markers={scenario.markers}
+          />
           <BelowMap>
             <section className="rounded-2xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
               이 구간은 아직 위험구간 검증이 되지 않아 추천을 제공하지 않습니다.
@@ -64,6 +88,217 @@ export default async function ResultPage({
 }
 
 /**
+ * 임의 구간(목적지 텍스트 + GPS 출발지) 결과 페이지.
+ *
+ * 굳혀둔 3구간과 달리 데이터가 요청 시점에 나온다 — 목적지 지오코딩 → 표준노드링크 인덱스 →
+ * 카카오 길찾기 실시간 조회를 순서대로 거치고, 어느 단계든 실패하면 사유를 그대로 보여준다
+ * (lib/route.ts의 원칙과 같다: 부담구간은 계산해 보여주되 확인 못 한 걸 말하지 않는다).
+ */
+async function CustomPage({
+  sp,
+  destQuery,
+  profile,
+}: {
+  sp: Record<string, string | string[] | undefined>;
+  destQuery: string;
+  profile: DriverProfile;
+}) {
+  // 출발지는 GPS 좌표(originLat/Lng) 또는 직접 입력한 지명(originText) 중 하나로 온다 —
+  // "제주공항 → 성산일출봉"처럼 특정 구간을 재현하려면 GPS로는 안 되니 텍스트 경로를 남겨둔다.
+  const originText = oneOf(sp, "originText");
+  let origin: { coord: LatLng; label: string };
+  if (originText) {
+    const found = await geocodePlace(originText);
+    if (!found) {
+      return (
+        <ErrorMain reason={`"${originText}"의 위치를 찾을 수 없습니다. 정확한 장소명이나 주소로 다시 입력해주세요.`} />
+      );
+    }
+    origin = found;
+  } else {
+    const originLat = Number(oneOf(sp, "originLat"));
+    const originLng = Number(oneOf(sp, "originLng"));
+    if (!Number.isFinite(originLat) || !Number.isFinite(originLng)) {
+      return <ErrorMain reason="현재 위치를 받지 못했습니다. 홈에서 다시 시도해주세요." />;
+    }
+    origin = { coord: [originLat, originLng], label: "현재 위치" };
+  }
+
+  const dest = await geocodePlace(destQuery);
+  if (!dest) {
+    return (
+      <ErrorMain reason={`"${destQuery}"의 위치를 찾을 수 없습니다. 정확한 장소명이나 주소로 다시 입력해주세요.`} />
+    );
+  }
+
+  const live = await routesFor(origin.coord, dest.coord, loadLinks());
+  if ("error" in live) return <ErrorMain reason={live.error} />;
+
+  return (
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 p-5 text-slate-800 lg:max-w-[64rem]">
+      <header className="flex items-baseline gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">길 안심 제주</h1>
+          <p className="text-sm text-slate-500">
+            {origin.label} → {dest.label}
+          </p>
+        </div>
+        <ProfileMenu profile={profile} />
+      </header>
+      <CustomRoutes origin={origin} dest={dest} routes={live.routes} profile={profile} />
+    </main>
+  );
+}
+
+/** 목적지를 못 찾거나 길찾기가 실패했을 때 — 원인을 그대로 보여준다. */
+function ErrorMain({ reason }: { reason: string }) {
+  return (
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 p-5 text-slate-800">
+      <header className="flex items-baseline gap-3">
+        <h1 className="text-2xl font-bold">길 안심 제주</h1>
+        <Link href="/" className="ml-auto shrink-0 text-sm text-slate-500 underline hover:text-slate-800">
+          다시 입력
+        </Link>
+      </header>
+      <section className="rounded-2xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">{reason}</section>
+    </main>
+  );
+}
+
+/**
+ * 임의 구간 지도·카드·AI 문장. Verified와 같은 계산(scoreRoutes·briefing·aiSentences)을 쓰지만,
+ * routesFor가 이미 실시간 조회라 liveTraffic으로 다시 덮어쓸 값이 없다.
+ *
+ * 대안 경로가 없는 구간(routes 1개)은 비교할 상대가 없어 부담점수·추천을 매기지 않는다 —
+ * lib/route.ts의 sameRoute 판정과 같은 이유다.
+ */
+function CustomRoutes({
+  origin,
+  dest,
+  routes,
+  profile,
+}: {
+  origin: { coord: LatLng; label: string };
+  dest: { coord: LatLng; label: string };
+  routes: [LiveRoute, LiveRoute] | [LiveRoute];
+  profile: DriverProfile;
+}) {
+  if (routes.length === 1) {
+    const only = routes[0];
+    const riskMarkers = only.risks.map((r) => ({ coord: r.coord, label: `${r.label} (${r.location})` }));
+    return (
+      <>
+        <MapArea
+          center={origin.coord}
+          level={10}
+          destination={dest}
+          profile={profile}
+          routes={[{ path: only.path, color: only.color, weight: 9, opacity: 0.95 }]}
+          markers={[origin, dest, ...riskMarkers]}
+        />
+        <BelowMap>
+          <section className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+            <p className="font-semibold">{only.name}</p>
+            <p className="mt-1 tabular-nums text-slate-500">
+              {only.durationMin}분 · {only.distanceKm}km
+            </p>
+            <p className="mt-2 leading-relaxed text-slate-600">
+              대안 경로가 없어 비교 없이 이 경로만 안내합니다 — 도로 구성이 같은 경로는 하나로 봅니다.
+            </p>
+            {/* 여기도 "무슨 일이 생기는가"를 먼저 준다 — 고를 경로가 없을 때는 더더욱 수치보다 이게 필요하다 */}
+            {only.risks.length > 0 && (
+              <ul className="mt-3 space-y-2 text-xs text-slate-500">
+                {only.risks.map((r) => (
+                  <li key={r.label}>
+                    <span className="font-medium text-slate-700">{r.label}</span>
+                    <p className="mt-0.5 leading-relaxed text-slate-700">{WHY[r.type]}</p>
+                    <p className="mt-0.5 tabular-nums">
+                      {r.value} · 경로의 {Math.round(r.exposure * 100)}%
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <p className="text-xs text-slate-400">
+            소요시간·경로·위험요인: {only.durationSource} — 실시간으로 분석한 참고용 결과입니다.
+          </p>
+        </BelowMap>
+      </>
+    );
+  }
+
+  const [fast, safe] = routes;
+  const result = scoreRoutes(profile, fast, safe);
+  const { recommendedRoute: pick, fastScore, safeScore } = result;
+
+  const line = (r: LiveRoute, recommended: boolean) => ({
+    path: r.path,
+    color: r.color,
+    weight: recommended ? 9 : 4,
+    opacity: recommended ? 0.95 : 0.35,
+  });
+
+  const riskMarkers = [...fast.risks, ...safe.risks].map((r) => ({
+    coord: r.coord,
+    label: `${r.label} (${r.location})`,
+  }));
+
+  const ai = aiSentences(factsOf(`${origin.label} → ${dest.label}`, profile, result, [fast, safe]));
+  const 규칙브리핑 = briefing(profile, result, { fast, safe });
+
+  return (
+    <>
+      <MapArea
+        center={origin.coord}
+        level={10}
+        destination={dest}
+        profile={profile}
+        routes={[line(fast, pick === "fast"), line(safe, pick === "safe")]}
+        markers={[origin, dest, ...riskMarkers]}
+      >
+        <RailButton glyph="💡" label="팁" tone="bg-emerald-50 text-emerald-900">
+          <p className="text-base font-bold">출발 전 팁</p>
+          <Suspense fallback={<BriefingSkeleton n={규칙브리핑.length} />}>
+            <AiBriefing p={ai} fallback={규칙브리핑} />
+          </Suspense>
+        </RailButton>
+      </MapArea>
+
+      <BelowMap>
+        <section className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 items-start gap-3">
+            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} ai={ai} />
+            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} ai={ai} />
+          </div>
+
+          {pick === "single" && (
+            <p className="rounded-xl bg-slate-100 p-3 text-center text-sm text-slate-600">
+              두 경로의 부담 차이가 작습니다 — 익숙한 경로를 이용하세요
+            </p>
+          )}
+        </section>
+
+        <section>
+          <Suspense fallback={null}>
+            <AiSummary p={ai} />
+          </Suspense>
+          <p className="mt-1 text-xs text-slate-500">
+            적용된 가중치:{" "}
+            {activeWeights(profile).length ? activeWeights(profile).join(" · ") : "없음 (기본점수 그대로)"}
+          </p>
+        </section>
+
+        <p className="text-xs text-slate-400">
+          소요시간·거리·경로좌표: {fast.durationSource} — 사전 검증된 구간이 아니라 실시간으로 분석한 참고용
+          결과입니다.
+        </p>
+      </BelowMap>
+    </>
+  );
+}
+
+/**
  * 지도 + 오른쪽 아이콘 레일. 부가 정보를 카드로 나란히 놓으면 그 폭만큼 지도가 좁아져서
  * 정작 봐야 할 경로가 작게 나온다 — 그래서 아이콘으로 접어 두고 패널만 지도 위로 띄운다.
  *
@@ -72,24 +307,29 @@ export default async function ResultPage({
  * 높이는 이 줄이 쥔다 — 패널의 max-h 가 기준으로 삼는 값이다.
  */
 function MapArea({
-  scenario,
+  center,
+  level,
+  destination,
   profile,
   routes,
   markers,
   children,
 }: {
-  scenario: (typeof SCENARIOS)[number];
+  center: LatLng;
+  level: number;
+  /** 목적지 좌표·이름 — 주차·착한가격업소 조회는 구간이 아니라 여기서 나온다 (임의 목적지도 같은 함수를 쓴다). */
+  destination: { coord: LatLng; label: string };
   profile: DriverProfile;
   children?: React.ReactNode;
 } & Pick<React.ComponentProps<typeof RouteMap>, "routes" | "markers">) {
-  const parking = parkingFor(scenario.id);
+  const parking = parkingAt(destination.label, destination.coord);
   // 평행주차 판정은 초보에게만 낸다 — 경력자에겐 노상·노외 구분이 의미가 없다.
   const odds = parking && isNovice(profile) ? parallelOdds(parking!) : null;
-  const goodprice = goodpriceFor(scenario.id);
+  const goodprice = goodpriceAt(destination.label, destination.coord);
   return (
     <div className="flex h-[52vh] min-h-72 w-full gap-2 lg:h-[68vh] lg:min-h-[32rem]">
       <div className="min-w-0 flex-1">
-        <RouteMap center={scenario.center} level={scenario.level} routes={routes} markers={markers} />
+        <RouteMap center={center} level={level} routes={routes} markers={markers} />
       </div>
       <div className="flex w-12 shrink-0 flex-col items-center gap-3 pt-1">
         {parking && (
@@ -437,7 +677,9 @@ async function Verified({
     <>
       {/* ② 경로 비교 — 지도는 화면 폭을 다 쓰고, 아래 내용은 원래 폭을 지킨다 */}
       <MapArea
-        scenario={scenario}
+        center={scenario.center}
+        level={scenario.level}
+        destination={scenario.markers[scenario.markers.length - 1]}
         profile={profile}
         routes={[line(fast, pick === "fast"), line(safe, pick === "safe")]}
         markers={[...scenario.markers, ...riskMarkers]}
@@ -454,8 +696,8 @@ async function Verified({
       <BelowMap>
         <section className="flex flex-col gap-3">
           <div className="grid grid-cols-2 items-start gap-3">
-            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} live={live?.fast} />
-            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} live={live?.safe} />
+            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} live={live?.fast} ai={ai} />
+            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} live={live?.safe} ai={ai} />
           </div>
 
           {/* 실시간 안내가 검증된 경로를 벗어나면 지도의 위험요인과 어긋난다 — 조용히 넘기지 않는다 */}
@@ -554,6 +796,55 @@ async function AiBriefing({ p, fallback }: { p: Promise<AiSentences | null>; fal
   );
 }
 
+/**
+ * 팝업 머리말 — 이 경로를 추천하는(또는 추천하지 않는) 이유.
+ *
+ * AI가 실패하거나 하루 한도에 걸리면 규칙 문장(lib/briefing.ts 의 verdict)으로 떨어진다.
+ * 여기는 AiSummary 와 달리 빈 자리로 둘 수 없다 — 팝업을 여는 이유가 이 문장이다.
+ */
+async function AiVerdict({
+  p,
+  index,
+  fallback,
+  recommended,
+}: {
+  p: Promise<AiSentences | null>;
+  /** 경로 순서 (fast 0, safe 1) — AiSentences.verdicts 가 같은 순서다 */
+  index: 0 | 1;
+  fallback: string;
+  recommended: boolean;
+}) {
+  const ai = await p;
+  return (
+    <Verdict recommended={recommended} ai={!!ai}>
+      {ai?.verdicts[index] ?? fallback}
+    </Verdict>
+  );
+}
+
+/** 규칙 문장과 AI 문장이 같은 자리를 쓰므로 모양은 한 곳에 둔다 (기다리는 동안도 이 모양이다). */
+function Verdict({
+  recommended,
+  ai,
+  children,
+}: {
+  recommended: boolean;
+  /** 누가 쓴 문장인지 밝힌다 — AiBriefing 과 같은 이유다 */
+  ai: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`mt-3 rounded-xl p-3 ${recommended ? "bg-emerald-50 text-emerald-900" : "bg-slate-100 text-slate-700"}`}
+    >
+      <p className="text-sm leading-relaxed">{children}</p>
+      <p className="mt-1.5 text-[10px] opacity-60">
+        {ai ? "생성형 AI가 계산된 수치와 확인된 위험요인만으로 작성했습니다." : "계산 결과로 조립한 문장입니다."}
+      </p>
+    </div>
+  );
+}
+
 /** AI를 기다리는 동안. 문장 수만큼 회색 줄을 둬서 뜨는 순간 높이가 튀지 않는다. */
 function BriefingSkeleton({ n }: { n: number }) {
   return (
@@ -571,6 +862,7 @@ function RouteCard({
   recommended,
   result,
   live,
+  ai,
 }: {
   r: Route;
   score: number;
@@ -578,13 +870,20 @@ function RouteCard({
   result: ReturnType<typeof scoreRoutes>;
   /** 실시간 교통. 없으면(조회 실패) 혼잡 줄을 아예 그리지 않는다 — 모르는 걸 "원활"로 쓰지 않는다. */
   live?: Live;
+  /** 두 카드가 같은 promise 를 받는다 — await 는 각자 하지만 모델 호출은 한 번이다 */
+  ai: Promise<AiSentences | null>;
 }) {
   const 혼잡 = live && congestionLabel(live.congestion);
+  const 규칙판정 = verdict(result, r);
+  // 좁은 화면에서는 패딩을 줄인다 — 375px에서 카드 폭이 162px라 8px도 한 글자다.
+  // 2열 자체는 어느 폭에서도 유지한다: 두 점수를 나란히 못 보면 이 화면이 할 말이 없다.
+  // break-keep: 한글은 기본이 글자 단위 줄바꿈이라 "서 행"처럼 낱말이 쪼개진다.
   return (
-    <details
-      className={`group rounded-2xl p-4 ${recommended ? "bg-emerald-50 ring-2 ring-emerald-300" : "bg-slate-50"}`}
-    >
-      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+    <RiskDialog
+      className={`rounded-2xl p-3 break-keep sm:p-4 ${recommended ? "bg-emerald-50 ring-2 ring-emerald-300" : "bg-slate-50"}`}
+      title={`${r.name} — 이 길에서 만나는 것`}
+      face={
+        <>
         <div className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
           <span className="text-sm font-semibold">{r.name}</span>
@@ -613,40 +912,52 @@ function RouteCard({
             추천
           </div>
         )}
+        {/* 좁은 칸에서 요인 이름을 잘라내지 않는다("5.16도로 연속 급…") — 두 줄로 접히게 둔다.
+            어느 요인인지가 이 목록의 전부인데 그걸 자르면 목록이 있을 이유가 없다. */}
         <ul className="mt-2.5 space-y-0.5 text-xs text-slate-500">
           {rowsOf(result, r).map(({ risk, weighted }) => (
             <li key={risk.label} className="flex justify-between gap-2">
-              <span className="truncate">{risk.label}</span>
+              <span>{risk.label}</span>
               <span className="shrink-0 tabular-nums">{weighted}</span>
             </li>
           ))}
         </ul>
         <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400">
-          <span className="group-open:hidden">눌러서 계산 근거 보기</span>
-          <span className="hidden group-open:inline">계산 근거</span>
-          <span className="text-[9px] transition-transform group-open:rotate-180">▼</span>
+          눌러서 어떤 길인지 보기 <span className="text-[9px]">›</span>
         </p>
-      </summary>
+        </>
+      }
+    >
+      {/* 왜 이 길인지(또는 왜 아닌지)가 먼저. 규칙 문장을 폴백으로 먼저 그려두고 AI 문장이
+          오면 갈아끼운다 — 기다리는 동안에도 빈칸이 아니고, AI가 죽어도 자리가 남는다. */}
+      <Suspense
+        fallback={
+          <Verdict recommended={recommended} ai={false}>
+            {규칙판정}
+          </Verdict>
+        }
+      >
+        <AiVerdict p={ai} index={r.id === "fast" ? 0 : 1} fallback={규칙판정} recommended={recommended} />
+      </Suspense>
 
-      {/* 항목별 계산 — 요약 줄의 숫자가 어디서 나왔는지 (기본 × 노출 × 조건) */}
-      <ul className="mt-2 flex flex-col gap-2.5 border-t border-black/5 pt-2.5">
-        {rowsOf(result, r).map(({ risk, base, exposure, multiplier, weighted }) => (
-          <li key={risk.label} className="text-xs">
-            <div className="flex justify-between gap-2 text-slate-800">
-              <span className="font-medium">{risk.label}</span>
-              <span className="shrink-0 font-semibold tabular-nums">{weighted}점</span>
-            </div>
-            <div className="mt-0.5 text-[11px] text-slate-500">{risk.location}</div>
-            <div className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+      {/* 무슨 일이 생기는가 + 얼마나 되는가, 두 줄이 끝이다.
+          걷어낸 것: 곱셈식(기본 × 노출 × 조건)은 우리 검산용이고, 위치(도로명)는 지도 마커가
+          이미 찍고 있고, 요인별 출처는 같은 줄이 반복돼 아래 한 줄로 모았다. */}
+      <ul className="mt-3 flex flex-col gap-4 border-t border-black/5 pt-3">
+        {rowsOf(result, r).map(({ risk }) => (
+          <li key={risk.label}>
+            <p className="text-sm font-semibold text-slate-800">{risk.label}</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-700">{WHY[risk.type]}</p>
+            {/* 크기는 남긴다 — 12km와 1.8km가 같은 문장을 달고 있으면 어느 길이 나쁜지 알 수 없다 */}
+            <p className="mt-1 text-xs tabular-nums text-slate-500">
               {risk.value} · 경로의 {Math.round(risk.exposure * 100)}%
-            </div>
-            <div className="mt-0.5 text-[11px] tabular-nums text-slate-400">
-              기본 {base} × 노출 {exposure} × 조건 {multiplier}
-            </div>
-            <div className="mt-0.5 text-[11px] text-amber-600">{risk.source}</div>
+            </p>
           </li>
         ))}
       </ul>
-    </details>
+      <p className="mt-4 border-t border-black/5 pt-2 text-[10px] leading-relaxed text-slate-400">
+        출처: {[...new Set(rowsOf(result, r).map((b) => b.risk.source))].join(" · ")}
+      </p>
+    </RiskDialog>
   );
 }

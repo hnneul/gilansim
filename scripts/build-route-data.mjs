@@ -18,7 +18,8 @@ const DATA = fileURLToPath(new URL("../data/", import.meta.url));
 const ENV = fileURLToPath(new URL("../.env.local", import.meta.url));
 
 const 공항 = "126.493,33.507";
-const 서귀포시청 = "126.5601,33.2541";
+// 카카오 로컬 API 키워드 검색 ("서귀포 매일올레시장", 서귀포시 중앙로62번길 18)
+const 올레시장 = "126.5632,33.2502";
 const DEPARTURE = "202607281000"; // 고정해야 소요시간이 재현된다
 
 const KEY = readFileSync(ENV, "utf8")
@@ -38,7 +39,7 @@ async function directions(priority) {
   if (!KEY) throw new Error("KAKAO_REST_API_KEY 없음 (.env.local)");
   const q = new URLSearchParams({
     origin: 공항,
-    destination: 서귀포시청,
+    destination: 올레시장,
     priority,
     departure_time: DEPARTURE,
     road_details: "true",

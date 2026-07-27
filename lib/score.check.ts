@@ -3,7 +3,7 @@
 
 import assert from "node:assert";
 import { scoreRoutes, type DriverProfile, type RiskFactor } from "./score.ts";
-import { briefing } from "./briefing.ts";
+import { briefing, verdict } from "./briefing.ts";
 
 /** exposure를 안 주면 기준 노출(20%)로 둔다 — 노출 배수 1.0이라 기존 기대값과 비교하기 쉽다 */
 const dummy = (type: RiskFactor["type"], label: string, exposure = 0.2): RiskFactor => ({
@@ -181,3 +181,15 @@ for (const line of [...초보브리핑, ...베테랑브리핑]) {
 }
 
 console.log("\n✅ 추천 이유 개인화 + 브리핑 정상");
+
+// 조사는 받침을 보고 고른다 — "연속 급커브이 …" 가 실제로 화면에 떴다
+{
+  const 커브 = { risks: [dummy("sharpCurve", "연속 급커브", 0.3)], durationMin: 60 };
+  const 구간 = { risks: [dummy("narrowRoad", "좁은 교행 구간", 0.05)], durationMin: 55 };
+  const r = scoreRoutes(초보, 커브, 구간);
+  const 커브판정 = verdict(r, { id: "fast", risks: 커브.risks, durationMin: 60 }, { durationMin: 55 });
+  const 구간판정 = verdict(r, { id: "safe", risks: 구간.risks, durationMin: 55 }, { durationMin: 60 });
+  assert.ok(커브판정.includes("급커브가"), `받침 없는 이름에 "이"를 붙였다: ${커브판정}`);
+  assert.ok(구간판정.includes("구간이") || !구간판정.includes("구간가"), `받침 있는 이름에 "가"를 붙였다: ${구간판정}`);
+  console.log("판정 문장:", 커브판정, "/", 구간판정);
+}

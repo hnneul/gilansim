@@ -109,11 +109,7 @@ async function CustomPage({
   let origin: { coord: LatLng; label: string };
   if (originText) {
     const found = await geocodePlace(originText);
-    if (!found) {
-      return (
-        <ErrorMain reason={`"${originText}"의 위치를 찾을 수 없습니다. 정확한 장소명이나 주소로 다시 입력해주세요.`} />
-      );
-    }
+    if ("error" in found) return <ErrorMain reason={found.error} />;
     origin = found;
   } else {
     const originLat = Number(oneOf(sp, "originLat"));
@@ -125,11 +121,7 @@ async function CustomPage({
   }
 
   const dest = await geocodePlace(destQuery);
-  if (!dest) {
-    return (
-      <ErrorMain reason={`"${destQuery}"의 위치를 찾을 수 없습니다. 정확한 장소명이나 주소로 다시 입력해주세요.`} />
-    );
-  }
+  if ("error" in dest) return <ErrorMain reason={dest.error} />;
 
   const live = await routesFor(origin.coord, dest.coord, loadLinks());
   if ("error" in live) return <ErrorMain reason={live.error} />;
@@ -268,8 +260,8 @@ function CustomRoutes({
       <BelowMap>
         <section className="flex flex-col gap-3">
           <div className="grid grid-cols-2 items-start gap-3">
-            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} ai={ai} />
-            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} ai={ai} />
+            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} ai={ai} other={safe} />
+            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} ai={ai} other={fast} />
           </div>
 
           {pick === "single" && (
@@ -696,8 +688,8 @@ async function Verified({
       <BelowMap>
         <section className="flex flex-col gap-3">
           <div className="grid grid-cols-2 items-start gap-3">
-            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} live={live?.fast} ai={ai} />
-            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} live={live?.safe} ai={ai} />
+            <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} live={live?.fast} ai={ai} other={safe} />
+            <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} live={live?.safe} ai={ai} other={fast} />
           </div>
 
           {/* 실시간 안내가 검증된 경로를 벗어나면 지도의 위험요인과 어긋난다 — 조용히 넘기지 않는다 */}
@@ -863,6 +855,7 @@ function RouteCard({
   result,
   live,
   ai,
+  other,
 }: {
   r: Route;
   score: number;
@@ -872,9 +865,11 @@ function RouteCard({
   live?: Live;
   /** 두 카드가 같은 promise 를 받는다 — await 는 각자 하지만 모델 호출은 한 번이다 */
   ai: Promise<AiSentences | null>;
+  /** 상대 경로 — AI 없이 판정 문장을 쓸 때 소요시간을 비교한다 (lib/briefing.ts verdict) */
+  other: { durationMin: number | null };
 }) {
   const 혼잡 = live && congestionLabel(live.congestion);
-  const 규칙판정 = verdict(result, r);
+  const 규칙판정 = verdict(result, r, other);
   // 좁은 화면에서는 패딩을 줄인다 — 375px에서 카드 폭이 162px라 8px도 한 글자다.
   // 2열 자체는 어느 폭에서도 유지한다: 두 점수를 나란히 못 보면 이 화면이 할 말이 없다.
   // break-keep: 한글은 기본이 글자 단위 줄바꿈이라 "서 행"처럼 낱말이 쪼개진다.

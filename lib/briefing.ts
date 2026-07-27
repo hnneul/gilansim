@@ -49,6 +49,16 @@ export const WHY: Record<RiskType, string> = {
 };
 
 /**
+ * 받침 유무로 조사를 고른다 — "좁은 교행 구간이"는 맞고 "연속 급커브이"는 틀리다.
+ * 요인 이름이 데이터에서 오니 문장을 조립할 때 골라야 한다 (한글 음절은 0xAC00 부터
+ * 28개씩 종성이 돌고, 나머지가 0이면 받침이 없다). 한글이 아니면 "가"로 둔다.
+ */
+function 이가(word: string): string {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  return code >= 0 && code < 11172 && code % 28 !== 0 ? "이" : "가";
+}
+
+/**
  * 경로 한 개에 대한 판정 한 줄 — AI 문장(lib/ai.ts 의 verdicts)을 못 받았을 때 쓴다.
  *
  * 점수를 읊지 않는다. 이 문장이 앉는 자리는 부담점수를 이미 큰 글씨로 보여준 카드를
@@ -60,8 +70,14 @@ export const WHY: Record<RiskType, string> = {
  * 추천 경로가 항상 점수까지 낮은 건 아니다(시간 이득을 함께 보므로) — 그래서 "더 낮다"고
  * 단정하지 않는다. lib/score.ts 의 추천 규칙을 그대로 옮기지 않으려는 것이다.
  */
-export function verdict(result: ScoreResult, route: { id: "fast" | "safe"; risks: RiskFactor[] }): string {
-  if (result.recommendedRoute === "single") return "두 경로의 부담이 비슷합니다. 익숙한 쪽을 고르세요.";
+export function verdict(
+  result: ScoreResult,
+  route: { id: "fast" | "safe"; risks: RiskFactor[]; durationMin: number | null },
+  /** 상대 경로. 추천 이유는 결국 비교라서 한쪽만 보고는 쓸 수 없다 (소요시간만 쓴다). */
+  other: { durationMin: number | null },
+): string {
+  if (result.recommendedRoute === "single")
+    return "두 경로의 부담이 비슷합니다. 어느 쪽으로 가도 크게 다르지 않으니 익숙한 길로 가세요.";
 
   // 부담이 가장 큰 요인. breakdown 을 route 로 먼저 좁힌다 — 요인 이름이 양쪽에 같으면
   // factor 만으로 찾다가 다른 경로 행이 잡힌다 (lib/ai.ts factsOf 와 같은 함정이다).
@@ -71,11 +87,20 @@ export function verdict(result: ScoreResult, route: { id: "fast" | "safe"; risks
     .map((b) => route.risks.find((r) => r.label === b.factor))
     .find((r): r is RiskFactor => !!r);
 
-  if (result.recommendedRoute === route.id)
-    return 최대 ? `이 길을 추천합니다. 가장 신경 쓸 곳은 ${최대.label}입니다.` : "이 길을 추천합니다.";
+  const 몫 = 최대 && `경로의 ${Math.round(최대.exposure * 100)}%`;
+  const 분 =
+    route.durationMin != null && other.durationMin != null ? other.durationMin - route.durationMin : null;
+
   // "초보에게는"을 붙이지 않는다 — 이 함수는 프로필을 받지 않고, 부담점수가 이미
   // 프로필을 반영한 값이다. 경력 3년 화면에서 "초보에게는"이 뜨는 걸 봤다.
-  return 최대 ? `${최대.label} 때문에 부담이 큰 길입니다.` : "이 길은 추천하지 않습니다.";
+  if (result.recommendedRoute === route.id) {
+    const 앞 = 분 != null && 분 > 0 ? `다른 길보다 ${분}분 빠르고 부담도 적어 이 길을 추천합니다.` : "두 경로 중 부담이 적어 이 길을 추천합니다.";
+    return 최대 ? `${앞} 그래도 ${최대.label}${이가(최대.label)} ${몫}를 차지하니 그 구간만 신경 쓰세요.` : 앞;
+  }
+  const 뒤 = 분 != null && 분 < 0 ? ` 게다가 다른 길보다 ${-분}분 더 걸립니다.` : "";
+  return 최대
+    ? `${최대.label}${이가(최대.label)} ${몫}를 차지해 부담이 큰 길입니다.${뒤}`
+    : `이 길은 추천하지 않습니다.${뒤}`;
 }
 
 type RouteLike = { name: string; risks: RiskFactor[]; durationMin: number | null };

@@ -98,6 +98,38 @@ for (const [name, r] of [["초보", a], ["베테랑", b]] as const)
 // 결정론적: 같은 입력이면 같은 출력
 assert.deepEqual(scoreRoutes(초보, 빠른경로, 저부담경로), a);
 
+// --- 부담이 낮은 쪽을 추천한다 ---
+// 실측(공항→성산일출봉): 소요시간이 60분 = 60분으로 같아 "시간 이득 없음" 분기로 떨어지면서
+// 부담 36점 경로가 35.9점 경로를 제치고 "맞춤 저부담 · 추천" 배지를 달았다.
+// 점수를 계산해 놓고 안 보는 분기였다. 이제 ① 차이가 무의미하면 추천을 접고,
+// ② 시간 이득이 없으면 부담이 낮은 쪽을 고른다.
+const 큰부담 = { risks: [dummy("narrowRoad", "좁은 교행", 0.3)], durationMin: 60 };
+const 작은부담 = { risks: [dummy("narrowRoad", "좁은 교행", 0.05)], durationMin: 60 };
+const 같은부담 = { risks: [dummy("narrowRoad", "좁은 교행", 0.3)], durationMin: 60 };
+
+const 무의미 = scoreRoutes(초보, 큰부담, 같은부담);
+assert.equal(무의미.recommendedRoute, "single", `부담이 같으면 추천을 접어야 한다: ${무의미.fastScore}/${무의미.safeScore}`);
+
+// fast 쪽이 부담이 낮은데 시간 이득도 없는 경우 — 전에는 무조건 safe 였다
+const 역전 = scoreRoutes(초보, 작은부담, 큰부담);
+assert.equal(
+  역전.recommendedRoute,
+  "fast",
+  `부담이 낮은 쪽을 추천해야 한다: fast=${역전.fastScore} safe=${역전.safeScore}`,
+);
+
+// 브리핑 문장도 추천을 따라가야 한다 (전에는 시간손해만 보고 safe 를 추천한다고 썼다)
+const 역전브리핑 = briefing(초보, 역전, {
+  fast: { name: "가벼운길", risks: 작은부담.risks, durationMin: 60 },
+  safe: { name: "무거운길", risks: 큰부담.risks, durationMin: 60 },
+});
+assert.ok(역전브리핑[0].startsWith("가벼운길"), `브리핑이 추천과 어긋난다: ${역전브리핑[0]}`);
+const 무의미브리핑 = briefing(초보, 무의미, {
+  fast: { name: "가길", risks: 큰부담.risks, durationMin: 60 },
+  safe: { name: "나길", risks: 같은부담.risks, durationMin: 60 },
+});
+assert.ok(무의미브리핑[0].includes("차이가 크지 않습니다"), `추천을 접은 구간의 브리핑: ${무의미브리핑[0]}`);
+
 // --- 노출 크기 반영 ---
 // 같은 종류의 요인이라도 노출이 길면 점수가 커야 한다.
 // 실데이터에서 좁은 길 13.1km(31%)와 1.6km(3%)가 똑같이 28.4점으로 나왔던 버그의 회귀 방지.

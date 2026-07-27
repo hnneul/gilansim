@@ -46,6 +46,14 @@ assert.equal(sameRoute(fast, fast), true, "자기 자신을 다른 길로 봤다
 const 거리같고도로다름: Analysis = { ...safe, distanceKm: fast.distanceKm };
 assert.equal(sameRoute(fast, 거리같고도로다름), false, "거리가 같아도 도로가 다르면 다른 길이다");
 
+// 한쪽에만 다른 도로가 있으면 갈림이 아니라 우회로 한 토막이다.
+// 실측 근거: 공항→성산일출봉이 간선(번영로 19.9km · 금백조로 10.6km)을 통째로 공유하고
+// 최단시간 쪽만 서광로 3km · 동광로 2km 로 시내를 빠져나가는데, 두 장의 카드가
+// "번영로 경유"와 "서광로 경유"로 떴다 (둘 다 번영로를 달리고 47.2/47.8km, 60분, 부담 0.1점 차이).
+const 한쪽만우회: Analysis = { ...fast, roadKm: { ...fast.roadKm, 서광로: 3, 동광로: 2 } };
+assert.equal(sameRoute(fast, 한쪽만우회), true, "한쪽 우회로를 다른 길로 봤다");
+assert.equal(sameRoute(한쪽만우회, fast), true, "같은 길 판정이 순서에 따라 달라진다");
+
 // 도로 구성이 같으면 거리가 얼마나 달라도 같은 길이다.
 // 실측 근거: 공항→제주시청이 4.9km vs 5.3km(8% 차이)인데 둘 다 서광로였다.
 // 거리 조건을 두면 저기서 두 장의 카드가 똑같이 "서광로 경유"로 뜬다.

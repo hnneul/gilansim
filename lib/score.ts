@@ -145,16 +145,29 @@ export function scoreRoutes(
     safeRoute.durationMin != null &&
     fastRoute.durationMin < safeRoute.durationMin;
 
+  // 부담이 사실상 같으면 어느 쪽도 추천하지 않는다. 0.1점 차이를 "저부담"이라 부르면
+  // 사용자는 없는 차이를 믿고 길을 고른다 (실측: 공항→성산 35.9 vs 36).
+  const 무의미한차이 = Math.abs(fast.total - safe.total) <= Math.max(fast.total, safe.total) * 0.05;
+
   // PLAN.md §5 추천 규칙.
   // 시간 이득이 없으면 부담이 큰 경로를 추천할 근거 자체가 없다 —
   // 임계값 분기는 "시간을 얻는 대신 부담을 감수한다"는 교환을 전제로 하기 때문이다.
-  const recommendedRoute = !fastIsQuicker
-    ? "safe"
-    : fast.total <= COMFORT_THRESHOLD
-      ? "fast"
-      : safe.total < fast.total * 0.7
+  //
+  // 시간 이득이 없을 때 safe 를 그냥 추천하면 안 된다: 그건 "safe 경로는 언제나 부담이 낮다"를
+  // 전제하는데, 굳혀둔 구간(손으로 고른 평화로)에서만 참이고 런타임 경로의 safe 는
+  // 카카오 priority=TIME 결과일 뿐이다. 실측에서 부담 36점 경로가 35.9점 경로를 제치고
+  // 추천으로 떴다 — 점수를 계산해 놓고 안 보는 분기였다. 부담이 낮은 쪽을 고른다.
+  const recommendedRoute = 무의미한차이
+    ? "single"
+    : !fastIsQuicker
+      ? safe.total < fast.total
         ? "safe"
-        : "single";
+        : "fast"
+      : fast.total <= COMFORT_THRESHOLD
+        ? "fast"
+        : safe.total < fast.total * 0.7
+          ? "safe"
+          : "single";
 
   const top = [...fast.rows].sort((a, b) => b.weighted - a.weighted).slice(0, 2);
   const gap =
@@ -162,7 +175,9 @@ export function scoreRoutes(
       ? fastRoute.durationMin - safeRoute.durationMin
       : null;
 
-  const lead = !fastIsQuicker
+  const lead = 무의미한차이
+    ? `두 경로의 부담 차이가 작음 (${fast.total} / ${safe.total})`
+    : !fastIsQuicker
     ? gap != null
       ? `최단거리 경로가 ${gap}분 더 걸림 — 시간 이득이 없음 (부담점수 ${fast.total})`
       : `최단거리 경로에 시간 이득이 없음 (부담점수 ${fast.total})`

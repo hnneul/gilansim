@@ -12,12 +12,7 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* 다크모드 제거 — 심사위원 노트북 설정에 따라 톤이 달라지면 안 됨 (PLAN.md §11 디자인 방향) */
 
 body {
   background: var(--background);

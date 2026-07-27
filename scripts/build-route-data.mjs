@@ -11,7 +11,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { distance, sharpCurves, densestCluster, simplify } from "../lib/curvature.ts";
+import { distance, sharpCurves, densestCluster, simplify, WINDING_GAP } from "../lib/curvature.ts";
 
 // 프로젝트 경로에 한글이 있어 URL.pathname은 못 쓴다 (퍼센트 인코딩이 남는다)
 const DATA = fileURLToPath(new URL("../data/", import.meta.url));
@@ -112,11 +112,14 @@ for (const [id, priority] of [["fast", "DISTANCE"], ["safe", "TIME"]]) {
 
   const attr = path.map(matchLink);
 
-  // ① 급커브 — 저속 도로의 교차로 회전을 세지 않도록 제한속도 50↑ 구간만
-  const curves = sharpCurves(path, (i) => attr[i]?.MAX_SPD ?? null);
+  // ① 급커브 — 저속 도로의 교차로 회전을 세지 않도록 제한속도 50↑ 구간만.
+  //   구간 수는 100m 기준(서로 다른 커브를 합치지 않는다),
+  //   노출은 WINDING_GAP 기준(짧은 직선으로 끊긴 굽은 길을 하나로 본다). 다른 질문이다.
+  const spd = (i) => attr[i]?.MAX_SPD ?? null;
+  const curves = sharpCurves(path, spd);
+  const winding = sharpCurves(path, spd, 50, WINDING_GAP);
+  const windingM = winding.reduce((s, c) => s + c.lengthM, 0);
   const cluster = densestCluster(curves);
-  const onRoad = {};
-  for (const [i, c] of curves.entries()) void i, (onRoad[c.road ?? ""] ??= 0);
   const curveByRoad = {};
   for (const c of curves) {
     const near = path.reduce((b, p, i) => (distance(p, c.start) < distance(path[b], c.start) ? i : b), 0);
@@ -164,8 +167,11 @@ for (const [id, priority] of [["fast", "DISTANCE"], ["safe", "TIME"]]) {
     sharpCurve: {
       sections: curves.length,
       km: +(curves.reduce((s, c) => s + c.lengthM, 0) / 1000).toFixed(1),
-      // 노출 비율 — 요인마다 단위가 달라지면 점수에 크기를 반영할 수 없다
-      exposure: +(curves.reduce((s, c) => s + c.lengthM, 0) / route.summary.distance).toFixed(3),
+      windingKm: +(windingM / 1000).toFixed(1),
+      windingSections: winding.length,
+      // 노출 비율 — 요인마다 단위가 달라지면 점수에 크기를 반영할 수 없다.
+      // 급커브 조각만 더하면 과소평가된다 (커브 사이 직선도 굽은 길의 일부다).
+      exposure: +(windingM / route.summary.distance).toFixed(3),
       perKm: +(curves.length / (route.summary.distance / 1000)).toFixed(2),
       minRadiusM: curves.length ? Math.round(Math.min(...curves.map((c) => c.minRadius))) : null,
       byRoad: Object.fromEntries(Object.entries(curveByRoad).sort((a, b) => b[1] - a[1])),
@@ -191,7 +197,7 @@ for (const [id, priority] of [["fast", "DISTANCE"], ["safe", "TIME"]]) {
   console.log(`\n=== ${id} (${priority}) ${o.distanceKm}km / ${o.durationMin}분 ===`);
   console.log(`좌표 ${o.vertexCount}개 → 표시용 ${o.path.length}개 | 매칭 ${o.matchedKm}km, 미매칭 ${o.unmatchedKm}km`);
   const pct = (x) => `${Math.round(x * 100)}%`;
-  console.log(`급커브 ${o.sharpCurve.sections}구간 / ${o.sharpCurve.km}km (노출 ${pct(o.sharpCurve.exposure)}, 최소 R=${o.sharpCurve.minRadiusM}m)`, o.sharpCurve.byRoad);
+  console.log(`급커브 ${o.sharpCurve.sections}구간 / ${o.sharpCurve.km}km · 굽은구간 ${o.sharpCurve.windingKm}km (노출 ${pct(o.sharpCurve.exposure)}, 최소 R=${o.sharpCurve.minRadiusM}m)`, o.sharpCurve.byRoad);
   console.log(`  최밀집: 5km 내 ${o.sharpCurve.densest?.count}개 @${o.sharpCurve.densest?.at}`);
   console.log(`차로수1&50↑: ${o.narrow.km}km (노출 ${pct(o.narrow.exposure)})`, o.narrow.byRoad);
   console.log(`제한속도80↑: ${o.highSpeed.km}km (노출 ${pct(o.highSpeed.exposure)})`, o.highSpeed.byRoad);

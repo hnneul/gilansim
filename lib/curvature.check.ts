@@ -95,6 +95,13 @@ for (const [id, o] of Object.entries({ fast, safe }))
 // 노출이 두 경로를 실제로 가른다 — 이게 무너지면 점수가 다시 같아진다
 assert.ok(fast.narrow.exposure > safe.narrow.exposure * 5, "좁은 길 노출 차이 소실");
 assert.ok(fast.sharpCurve.exposure > safe.sharpCurve.exposure * 3, "급커브 노출 차이 소실");
+
+// 굽은 구간(병합 500m)은 급커브 조각(병합 100m)보다 길어야 한다 — 사이 직선을 포함하므로.
+// 이게 뒤집히면 노출이 다시 과소평가된다.
+for (const [id, o] of Object.entries({ fast, safe }))
+  assert.ok(o.sharpCurve.windingKm >= o.sharpCurve.km, `${id} 굽은 구간이 급커브 조각보다 짧다`);
+assert.ok(fast.sharpCurve.windingKm > 10, `5.16도로 굽은 구간 축소: ${fast.sharpCurve.windingKm}km`);
+assert.ok(fast.sharpCurve.windingSections < fast.sharpCurve.sections, "병합이 되지 않았다");
 assert.ok(safe.highSpeed.exposure > 0.4, "평화로 고속주행 노출 축소");
 assert.equal(fast.highSpeed.exposure, 0);
 

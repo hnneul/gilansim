@@ -75,12 +75,12 @@ const EXPOSURE_MAX = 2.5;
 export const exposureFactor = (exposure: number) =>
   Math.min(EXPOSURE_MAX, Math.max(EXPOSURE_MIN, exposure / EXPOSURE_REFERENCE));
 
-/** 고속주행은 초보에게만 부담이다 — 경력이 쌓이면 요인 자체가 사라진다 */
-function applies(type: RiskType, p: DriverProfile): boolean {
-  return type !== "highSpeed" || p.experienceYears <= 1;
-}
-
-/** 프로필 가중치(곱). SUV는 좁은 교행로에만 걸린다 — 차가 크다고 급커브가 더 위험하진 않다. */
+/**
+ * 프로필 가중치(곱). SUV는 좁은 교행로에만 걸린다 — 차가 크다고 급커브가 더 위험하진 않다.
+ *
+ * 고속주행은 경력이 쌓이면 부담이 크게 줄지만 0이 되지는 않는다.
+ * 요인을 아예 제거하면 근거 카드가 한 줄로 비어 "왜 이 경로인지"를 설명하지 못한다.
+ */
 function weight(type: RiskType, p: DriverProfile): number {
   let w = 1;
   if (p.experienceYears <= 1) w *= 1.3;
@@ -88,6 +88,7 @@ function weight(type: RiskType, p: DriverProfile): number {
   if (!p.jejuExperience) w *= 1.2;
   if (p.timeOfDay === "night") w *= 1.15;
   if (type === "narrowRoad" && p.vehicleSize === "suv") w *= 1.4;
+  if (type === "highSpeed" && p.experienceYears > 1) w *= 0.4;
   return w;
 }
 
@@ -99,6 +100,7 @@ export function activeWeights(p: DriverProfile): string[] {
   if (!p.jejuExperience) out.push("제주 운전경험 없음 ×1.2");
   if (p.timeOfDay === "night") out.push("야간 주행 ×1.15");
   if (p.vehicleSize === "suv") out.push("SUV ×1.4 (좁은 교행로에만)");
+  if (p.experienceYears > 1) out.push("경력 1년 초과 ×0.4 (고속주행에만)");
   return out;
 }
 
@@ -106,14 +108,12 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function scoreRoute(risks: RiskFactor[], p: DriverProfile) {
-  const rows = risks
-    .filter((r) => applies(r.type, p))
-    .map((r) => {
-      const base = BASE_SCORE[r.type];
-      const exposure = round2(exposureFactor(r.exposure));
-      const multiplier = round2(weight(r.type, p));
-      return { factor: r.label, base, exposure, multiplier, weighted: round1(base * exposure * multiplier) };
-    });
+  const rows = risks.map((r) => {
+    const base = BASE_SCORE[r.type];
+    const exposure = round2(exposureFactor(r.exposure));
+    const multiplier = round2(weight(r.type, p));
+    return { factor: r.label, base, exposure, multiplier, weighted: round1(base * exposure * multiplier) };
+  });
   // 합계는 반올림된 값들의 합 — 근거 카드의 숫자가 총점과 어긋나지 않게
   return { total: round1(rows.reduce((s, r) => s + r.weighted, 0)), rows };
 }

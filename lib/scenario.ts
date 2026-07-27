@@ -71,7 +71,7 @@ const FAST: Route = {
       label: "5.16도로 연속 급커브",
       location: `산천단~성판악 (5km 내 ${DATA.fast.sharpCurve.densest!.count}곳)`,
       coord: DATA.fast.sharpCurve.densest!.at as LatLng,
-      value: `곡선반경 100m 미만 급커브 ${DATA.fast.sharpCurve.byRoad["516로"]}곳 · ${DATA.fast.sharpCurve.km}km`,
+      value: `급커브 ${DATA.fast.sharpCurve.byRoad["516로"]}곳 (최소 반경 ${DATA.fast.sharpCurve.minRadiusM}m) · 굽은 구간 ${DATA.fast.sharpCurve.windingKm}km`,
       exposure: DATA.fast.sharpCurve.exposure,
       source: 곡률출처,
     },

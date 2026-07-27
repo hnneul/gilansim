@@ -579,7 +579,9 @@
   "sharpCurve": {
    "sections": 57,
    "km": 5.5,
-   "exposure": 0.128,
+   "windingKm": 15.1,
+   "windingSections": 14,
+   "exposure": 0.352,
    "perKm": 1.32,
    "minRadiusM": 7,
    "byRoad": {
@@ -952,7 +954,9 @@
   "sharpCurve": {
    "sections": 10,
    "km": 0.9,
-   "exposure": 0.017,
+   "windingKm": 1.8,
+   "windingSections": 7,
+   "exposure": 0.035,
    "perKm": 0.19,
    "minRadiusM": 14,
    "byRoad": {

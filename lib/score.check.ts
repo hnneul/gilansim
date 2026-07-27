@@ -55,12 +55,23 @@ assert.equal(b.recommendedRoute, "safe", "시간 이득이 없으면 베테랑�
 // 부담점수는 프로필에 따라 크게 달라진다 (PDF Core 완료 기준)
 assert.ok(a.fastScore > b.fastScore * 1.5, "초보의 부담점수가 베테랑보다 뚜렷이 높아야 한다");
 
-// 고속주행은 초보에게만 적용된다
-assert.ok(a.breakdown.some((r) => r.factor === "고속주행 구간"));
-assert.ok(!b.breakdown.some((r) => r.factor === "고속주행 구간"));
+// 고속주행은 경력이 쌓이면 부담이 크게 줄지만 요인 자체는 남는다.
+// 요인을 제거해버리면 베테랑의 근거 카드가 한 줄로 비어 완료 기준(2개 이상)에 미달했다.
+const 초보고속 = a.breakdown.find((r) => r.factor === "고속주행 구간");
+const 베테랑고속 = b.breakdown.find((r) => r.factor === "고속주행 구간");
+assert.ok(초보고속 && 베테랑고속, "고속주행 요인이 사라졌다");
+assert.ok(
+  베테랑고속.weighted < 초보고속.weighted * 0.3,
+  `경력에 따른 감소가 부족: ${초보고속.weighted} → ${베테랑고속.weighted}`,
+);
 
-// 근거 카드가 비지 않는다 (§3: 부담 요인 2개 이상)
-assert.ok(a.breakdown.filter((r) => r.route === "fast").length >= 2);
+// 근거 카드가 비지 않는다 — 어떤 프로필에서도 경로마다 부담요인 2개 이상 (PDF Supporting 1 완료 기준)
+for (const [name, r] of [["초보", a], ["베테랑", b]] as const)
+  for (const route of ["fast", "safe"] as const)
+    assert.ok(
+      r.breakdown.filter((x) => x.route === route).length >= 2,
+      `${name}/${route} 부담요인 2개 미달`,
+    );
 
 // 결정론적: 같은 입력이면 같은 출력
 assert.deepEqual(scoreRoutes(초보, 빠른경로, 저부담경로), a);

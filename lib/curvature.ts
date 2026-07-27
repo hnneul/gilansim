@@ -36,6 +36,15 @@ export function curveRadius(p0: LatLng, p1: LatLng, p2: LatLng): number {
 export const SHARP_RADIUS = 100;
 
 /**
+ * "굽은 구간"의 병합 간격. 급커브 사이 직선이 이보다 짧으면 하나의 연속 구간으로 본다.
+ * 80km/h로 22초, 50km/h로 36초 — 운전자가 긴장을 풀 여유가 없는 간격이다.
+ *
+ * 노출을 잴 때만 쓴다. "급커브 몇 곳"을 셀 때는 기본값(100m)을 써야
+ * 서로 다른 커브가 한 덩어리로 합쳐지지 않는다.
+ */
+export const WINDING_GAP = 500;
+
+/**
  * 급커브가 연속된 구간을 하나로 병합해 돌려준다.
  *
  * 좌표 개수를 그대로 세면 안 된다 — 길찾기 API는 곡선부에 좌표를 촘촘히 주므로
@@ -43,11 +52,15 @@ export const SHARP_RADIUS = 100;
  *
  * @param speedLimitAt 해당 좌표의 제한속도(km/h). 저속 도로의 교차로 회전을
  *        급커브로 세지 않기 위해 쓴다. 없으면 전부 대상.
+ * @param mergeGapM 이 거리 안에 다음 급커브가 있으면 같은 구간으로 본다.
+ *        작게 두면 "급커브 몇 곳"을, 크게 두면 "굽은 길이 몇 km"를 재게 된다.
+ *        둘은 다른 질문이라 호출부에서 값을 달리 준다 (WINDING_GAP 참고).
  */
 export function sharpCurves(
   path: LatLng[],
   speedLimitAt?: (i: number) => number | null,
   minSpeed = 50,
+  mergeGapM = 100,
 ): { start: LatLng; count: number; minRadius: number; lengthM: number }[] {
   const runs: { start: LatLng; end: LatLng; from: number; to: number; count: number; minRadius: number }[] = [];
 
@@ -60,7 +73,7 @@ export function sharpCurves(
     if (r >= SHARP_RADIUS) continue;
 
     const last = runs.at(-1);
-    if (last && distance(last.end, path[i]) < 100) {
+    if (last && distance(last.end, path[i]) < mergeGapM) {
       last.end = path[i];
       last.to = i;
       last.count++;

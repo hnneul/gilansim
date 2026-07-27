@@ -35,6 +35,55 @@ export type ParallelOdds = {
   detail: string;
 };
 
+/** 좌표째로 굳혀둔 주차장 한 곳 (data/parking-data.json). 거리는 런타임에 붙인다. */
+export type Lot = Omit<ParkingSpot, "walkM">;
+
+/** 카드 목록·미니 지도에 찍을 최대 개수. 판정은 전체 개수로 하고 표시만 자른다. */
+const SPOT_CAP = 40;
+
+const rad = (d: number) => (d * Math.PI) / 180;
+
+/** 두 좌표 사이 미터. 제주 크기에선 평면 근사로 충분하다 (빌드 스크립트와 같은 식). */
+const meters = (
+  [la1, lo1]: [number, number],
+  [la2, lo2]: [number, number],
+): number => Math.hypot(la2 - la1, (lo2 - lo1) * Math.cos(rad(la1))) * rad(1) * 6371000;
+
+/**
+ * 목적지 주변 주차장. 임의 목적지를 받으므로 목적지별로 미리 잘라둘 수가 없다 —
+ * 전체 1,572곳(약 150KB)을 굳혀두고 여기서 거른다. 1,572번 거리 계산은 1ms도 안 걸린다.
+ *
+ * 판정(parallelOdds)은 반경 안 **전체 개수**로 한다. spots 를 자르는 건 표시 몫이라서다 —
+ * 제주시청처럼 1km 안에 177곳(노상 135)인 목적지에서 지도를 다 찍으면 읽을 수 없다.
+ *
+ * 도보 거리는 저장된 좌표(소수 6자리)에서 잰다. 예전에는 빌드 스크립트가 CSV 원본
+ * 정밀도로 재서 굳혀뒀는데, 그 값과 최대 1m 어긋난다 (26곳 중 1곳이 104m→103m).
+ * 목록 순서와 총계는 그대로다. 계산하는 곳이 여기 하나뿐이니 앞으로 갈라질 일은 없다.
+ */
+export function nearbyParking(
+  label: string,
+  at: [number, number],
+  lots: Lot[],
+  walkM: number,
+): Parking | null {
+  const near: ParkingSpot[] = [];
+  for (const lot of lots) {
+    const d = Math.round(meters(at, lot.at));
+    if (d <= walkM) near.push({ ...lot, walkM: d });
+  }
+  if (!near.length) return null;
+
+  near.sort((a, b) => a.walkM - b.walkM);
+  return {
+    label,
+    at,
+    walkM,
+    total: near.length,
+    byType: near.reduce<Record<string, number>>((o, s) => ({ ...o, [s.type]: (o[s.type] ?? 0) + 1 }), {}),
+    spots: near.slice(0, SPOT_CAP),
+  };
+}
+
 /**
  * 목적지 주변 주차장 구성 → 평행주차를 만날 확률 판정.
  *

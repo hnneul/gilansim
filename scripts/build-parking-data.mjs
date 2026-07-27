@@ -25,7 +25,7 @@ const DATA = fileURLToPath(new URL("../data/", import.meta.url));
 /** 도보로 갈 만한 거리. 이 밖은 "목적지 주차장"이라 부르기 어렵다. */
 const WALK_M = 1000;
 
-/** 목적지당 굳혀 둘 주차장 수 (카드 목록 + 미니 지도 마커). 가까운 순으로 자른다. */
+/** 카드 목록·미니 지도에 찍을 최대 개수. 판정은 전체 개수로 하고 표시만 자른다. */
 const SPOT_CAP = 40;
 
 // 목적지 좌표는 lib/scenario.ts 의 도착 마커와 같다.
@@ -76,43 +76,36 @@ for (const type of ["노상", "노외", "부설"]) {
   if (n.length) stats[type] = { count: n.length, medianSpaces: median(n), under10Pct: Math.round((100 * n.filter((x) => x <= 10).length) / n.length) };
 }
 
-const out = { walkM: WALK_M, source: `공공데이터포털 제주시·서귀포시 주차장정보 (2026-04-16, ${lots.length}곳)`, stats, byDestination: {} };
-
-for (const dest of DESTINATIONS) {
-  const near = [];
-  for (const r of lots) {
-    const la = +r.위도, lo = +r.경도;
-    if (!Number.isFinite(la) || !Number.isFinite(lo) || (la === 0 && lo === 0)) continue; // 위경도 결측 85곳
-    const walkM = Math.round(meters(dest.at, [la, lo]));
-    if (walkM > WALK_M) continue;
-    near.push({
-      name: r.주차장명.trim(),
-      type: r.주차장유형, // 노상 / 노외 — 평행·직각 프록시
-      spaces: spacesOf(r),
-      fee: r.요금정보?.trim() || null, // 무료 / 유료 / 혼합
-      walkM,
-      at: [+la.toFixed(6), +lo.toFixed(6)],
-    });
-  }
-  near.sort((a, b) => a.walkM - b.walkM);
-  out.byDestination[dest.id] = {
-    label: dest.label,
-    at: dest.at,
-    walkM: WALK_M,
-    total: near.length,
-    byType: near.reduce((o, s) => ({ ...o, [s.type]: (o[s.type] ?? 0) + 1 }), {}),
-    // 판정(parallelOdds)은 near 전체 개수로 한다. spots 는 카드·미니 지도에 찍을 몫이라
-    // 상한을 둔다 — 제주시 시내처럼 1km 안에 177곳인 목적지가 들어오면 번들이 커진다.
-    spots: near.slice(0, SPOT_CAP),
-  };
+// 목적지별로 미리 잘라두지 않는다 — 임의 목적지를 받으므로 그 목록을 만들 수가 없다.
+// 전체를 좌표째로 굳혀두고 거리 필터는 런타임이 한다 (lib/parking.ts nearbyParking).
+// 1,657곳에서 좌표 결측을 뺀 전량이 약 150KB라 번들에 지고 갈 만하다.
+const spots = [];
+for (const r of lots) {
+  const la = +r.위도, lo = +r.경도;
+  if (!Number.isFinite(la) || !Number.isFinite(lo) || (la === 0 && lo === 0)) continue; // 위경도 결측 85곳
+  spots.push({
+    name: r.주차장명.trim(),
+    type: r.주차장유형, // 노상 / 노외 — 평행·직각 프록시
+    spaces: spacesOf(r),
+    fee: r.요금정보?.trim() || null, // 무료 / 유료 / 혼합
+    at: [+la.toFixed(6), +lo.toFixed(6)],
+  });
 }
 
-// 상한에 걸려 지도에서 빠진 곳이 있으면 조용히 넘기지 않는다
-for (const [id, d] of Object.entries(out.byDestination))
-  if (d.total > SPOT_CAP) console.warn(`  ! ${id}: ${d.total}곳 중 가까운 ${SPOT_CAP}곳만 저장 (지도에 ${d.total - SPOT_CAP}곳 안 찍힘)`);
+const out = {
+  walkM: WALK_M,
+  source: `공공데이터포털 제주시·서귀포시 주차장정보 (2026-04-16, ${lots.length}곳)`,
+  stats,
+  spots,
+};
 
-writeFileSync(`${DATA}parking-data.json`, JSON.stringify(out, null, 1));
-console.log(`주차장 ${lots.length}곳 → data/parking-data.json`);
-for (const [id, d] of Object.entries(out.byDestination))
-  console.log(`  ${id.padEnd(9)} ${d.label} ${WALK_M}m 내 ${String(d.total).padStart(3)}곳`, d.byType);
+writeFileSync(`${DATA}parking-data.json`, JSON.stringify(out));
+console.log(`주차장 ${lots.length}곳 중 좌표 있는 ${spots.length}곳 → data/parking-data.json`);
 console.log("  유형별 구획수:", stats);
+
+// 굳혀둔 3구간이 몇 곳으로 잡히는지는 찍어 둔다 — 데이터가 갱신되면 여기서 먼저 보인다
+for (const dest of DESTINATIONS) {
+  const near = spots.filter((s) => meters(dest.at, s.at) <= WALK_M);
+  const byType = near.reduce((o, s) => ({ ...o, [s.type]: (o[s.type] ?? 0) + 1 }), {});
+  console.log(`  ${dest.id.padEnd(9)} ${dest.label} ${WALK_M}m 내 ${String(near.length).padStart(3)}곳`, byType);
+}

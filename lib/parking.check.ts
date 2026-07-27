@@ -8,7 +8,7 @@
 import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parallelOdds, recommendedSpots, nearestSpots, type Parking, type ParkingSpot } from "./parking.ts";
+import { parallelOdds, recommendedSpots, nearestSpots, nearbyParking, type Parking, type ParkingSpot, type Lot } from "./parking.ts";
 
 const DATA = JSON.parse(readFileSync(fileURLToPath(new URL("../data/parking-data.json", import.meta.url)), "utf8"));
 
@@ -81,7 +81,25 @@ const rad = (deg: number) => (deg * Math.PI) / 180;
 const meters = ([la1, lo1]: number[], [la2, lo2]: number[]) =>
   Math.hypot(la2 - la1, (lo2 - lo1) * Math.cos(rad(la1))) * rad(1) * 6371000;
 
-for (const [id, d] of Object.entries(DATA.byDestination) as [string, Parking][]) {
+// 목적지별로 굳혀둔 목록은 더 없다 — 임의 목적지를 받으므로 런타임에 거른다.
+// 그래서 여기서도 nearbyParking 을 직접 불러 검증한다. 굳혀둔 3구간이 그 중 하나일 뿐이다.
+const 목적지 = [
+  { id: "seogwipo", label: "서귀포 매일올레시장", at: [33.2502, 126.5632] as [number, number] },
+  { id: "seongsan", label: "성산일출봉", at: [33.4581, 126.9425] as [number, number] },
+  { id: "hyeopjae", label: "협재해수욕장", at: [33.3943, 126.2397] as [number, number] },
+  // 임의 목적지도 돌아야 한다. 제주시청은 1km 안에 177곳(노상 135)으로 판정이 high 로 갈리는
+  // 유일한 실데이터 사례다 — 굳혀둔 세 곳은 전부 노외뿐이라 high 경로가 검증되지 않는다.
+  { id: "제주시청", label: "제주시청", at: [33.4996, 126.5312] as [number, number] },
+];
+
+const 계산 = 목적지.map((d) => [d.id, nearbyParking(d.label, d.at, DATA.spots as Lot[], DATA.walkM)] as const);
+assert.ok(
+  계산.find(([id]) => id === "제주시청")?.[1]?.byType["노상"],
+  "제주시청에 노상주차장이 안 잡힌다 — 데이터나 필터가 바뀌었다",
+);
+
+for (const [id, d] of 계산) {
+  assert.ok(d, `${id}: 주차장이 하나도 안 잡혔다`);
   assert.ok(d.spots.every((s) => s.walkM <= DATA.walkM), `${id}: 도보 반경 밖 주차장이 섞였다`);
 
   // 지도에 찍을 좌표 — 결측(위경도 없는 85곳)이 새면 엉뚱한 데 핀이 박힌다
@@ -100,6 +118,6 @@ for (const [id, d] of Object.entries(DATA.byDestination) as [string, Parking][])
 }
 
 console.log("✅ 주차장 평행·직각 프록시 판정 정상");
-console.log("   유형별 구획수:", DATA.stats);
-for (const [id, d] of Object.entries(DATA.byDestination) as [string, Parking][])
-  console.log(`   ${id.padEnd(9)} ${d.total}곳`, d.byType, d.total ? `→ ${parallelOdds(d).level}` : "");
+console.log(`   좌표 있는 주차장 ${DATA.spots.length}곳 · 유형별 구획수:`, DATA.stats);
+for (const [id, d] of 계산)
+  console.log(`   ${id.padEnd(9)} ${d!.total}곳`, d!.byType, `→ ${parallelOdds(d!).level}`);

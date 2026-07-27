@@ -43,7 +43,7 @@ export default function Home() {
           <select value={scenarioId} onChange={(e) => setScenarioId(e.target.value)}>
             {SCENARIOS.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.label} {s.verified ? "" : "(미검증)"}
+                {s.label}
               </option>
             ))}
           </select>

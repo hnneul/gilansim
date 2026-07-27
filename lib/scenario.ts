@@ -134,6 +134,9 @@ export const SCENARIOS: Scenario[] = [
     ],
     routes: [FAST, SAFE],
   },
+  // 동·서 구간은 이름만 올려둔 상태다. 공항에서 남(서귀포)·동(성산)·서(협재)로
+  // 갈라지는 세 방향을 덮으려는 것이고, 위험요인 검증 전이라 routes가 없다.
+  // §11 "검증되지 않은 구간은 추천하지 않는다" — 목록에는 보이되 추천은 안 한다.
   {
     id: "seongsan",
     label: "제주공항 → 성산일출봉",
@@ -144,6 +147,19 @@ export const SCENARIOS: Scenario[] = [
       { coord: 공항, label: "제주국제공항" },
       { coord: [33.4581, 126.9425], label: "성산일출봉" },
     ],
-    routes: null, // 위험구간 검증 전이라 추천을 제공하지 않는다
+    routes: null,
+  },
+  {
+    id: "hyeopjae",
+    label: "제주공항 → 협재해수욕장",
+    verified: false,
+    center: [33.45, 126.37],
+    level: 10,
+    markers: [
+      { coord: 공항, label: "제주국제공항" },
+      // 카카오 로컬 API 키워드 검색 (제주시 한림읍 협재리)
+      { coord: [33.3943, 126.2397], label: "협재해수욕장" },
+    ],
+    routes: null,
   },
 ];

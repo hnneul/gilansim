@@ -33,6 +33,11 @@ export default function RouteMap({ center, level = 10, routes, markers = [] }: P
   // 배열 prop이 매 렌더 새 참조라 의존성으로 직접 못 쓴다
   const shape = JSON.stringify({ center, level, routes, markers });
 
+  // 리마운트 시에는 Script가 이미 로드돼 있어 onLoad가 다시 불리지 않는다
+  useEffect(() => {
+    if (sdk === "loading" && window.kakao?.maps) window.kakao.maps.load(() => setSdk("ready"));
+  }, [sdk]);
+
   useEffect(() => {
     if (sdk !== "ready" || !box.current) return;
     const { kakao } = window;

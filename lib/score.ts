@@ -31,13 +31,9 @@ export type ScoreResult = {
   fastScore: number;
   safeScore: number;
   reasons: string[];
-  breakdown: {
-    route: "fast" | "safe";
-    risk: RiskFactor; // 위치·수치·출처를 근거 카드가 그대로 쓴다
-    base: number;
-    multiplier: number;
-    weighted: number;
-  }[];
+  // PLAN.md §4 그대로. factor는 RiskFactor.label이며,
+  // 근거 카드는 이 이름으로 Route.risks를 되짚어 위치·수치·출처를 가져온다.
+  breakdown: { route: "fast" | "safe"; factor: string; base: number; weighted: number }[];
 };
 
 export const BASE_SCORE: Record<RiskType, number> = {
@@ -79,45 +75,67 @@ export function activeWeights(p: DriverProfile): string[] {
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
-const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** 근거 카드가 "기본 15 × 2.03" 곱셈식을 복원할 때 쓴다 */
+export const multiplierOf = (base: number, weighted: number) =>
+  Math.round((weighted / base) * 100) / 100;
 
 function scoreRoute(risks: RiskFactor[], p: DriverProfile) {
   const rows = risks
     .filter((r) => applies(r.type, p))
     .map((r) => {
       const base = BASE_SCORE[r.type];
-      const m = weight(r.type, p);
-      return { risk: r, base, multiplier: round2(m), weighted: round1(base * m) };
+      return { factor: r.label, base, weighted: round1(base * weight(r.type, p)) };
     });
   // 합계는 반올림된 값들의 합 — 근거 카드의 숫자가 총점과 어긋나지 않게
   return { total: round1(rows.reduce((s, r) => s + r.weighted, 0)), rows };
 }
 
+type RouteInput = { risks: RiskFactor[]; durationMin: number | null };
+
 export function scoreRoutes(
   profile: DriverProfile,
-  fastRisks: RiskFactor[],
-  safeRisks: RiskFactor[],
+  fastRoute: RouteInput,
+  safeRoute: RouteInput,
 ): ScoreResult {
-  const fast = scoreRoute(fastRisks, profile);
-  const safe = scoreRoute(safeRisks, profile);
+  const fast = scoreRoute(fastRoute.risks, profile);
+  const safe = scoreRoute(safeRoute.risks, profile);
 
-  // PLAN.md §5 추천 규칙 — 단순 "점수 낮은 쪽"으로 짜면 저부담 경로가 항상 이겨 추천이 안 뒤집힌다
-  const recommendedRoute =
-    fast.total <= COMFORT_THRESHOLD
+  // 최단거리 경로가 시간까지 이득인가.
+  // 제주공항→서귀포시청 실측에서는 5.16도로가 오히려 6~10분 느려 항상 false다.
+  const fastIsQuicker =
+    fastRoute.durationMin != null &&
+    safeRoute.durationMin != null &&
+    fastRoute.durationMin < safeRoute.durationMin;
+
+  // PLAN.md §5 추천 규칙.
+  // 시간 이득이 없으면 부담이 큰 경로를 추천할 근거 자체가 없다 —
+  // 임계값 분기는 "시간을 얻는 대신 부담을 감수한다"는 교환을 전제로 하기 때문이다.
+  const recommendedRoute = !fastIsQuicker
+    ? "safe"
+    : fast.total <= COMFORT_THRESHOLD
       ? "fast"
       : safe.total < fast.total * 0.7
         ? "safe"
         : "single";
 
   const top = [...fast.rows].sort((a, b) => b.weighted - a.weighted).slice(0, 2);
-  const reasons = [
-    recommendedRoute === "fast"
+  const gap =
+    fastRoute.durationMin != null && safeRoute.durationMin != null
+      ? fastRoute.durationMin - safeRoute.durationMin
+      : null;
+
+  const lead = !fastIsQuicker
+    ? gap != null
+      ? `최단거리 경로가 ${gap}분 더 걸림 — 시간 이득이 없음 (부담점수 ${fast.total})`
+      : `최단거리 경로에 시간 이득이 없음 (부담점수 ${fast.total})`
+    : recommendedRoute === "fast"
       ? `빠른 경로 부담점수 ${fast.total} — 편안 임계값 ${COMFORT_THRESHOLD} 이하`
       : recommendedRoute === "safe"
         ? `빠른 경로 부담점수 ${fast.total} — 임계값 ${COMFORT_THRESHOLD} 초과`
-        : `두 경로의 부담 차이가 작음 (${fast.total} / ${safe.total})`,
-    ...top.map((r) => `${r.risk.label} ${r.weighted}점`),
-  ];
+        : `두 경로의 부담 차이가 작음 (${fast.total} / ${safe.total})`;
+
+  const reasons = [lead, ...top.map((r) => `${r.factor} ${r.weighted}점`)];
 
   return {
     recommendedRoute,

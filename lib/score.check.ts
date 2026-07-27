@@ -36,9 +36,9 @@ const 베테랑: DriverProfile = {
   timeOfDay: "day",
 };
 
-// 실측: 5.16도로 72분 / 평화로 65분 — 최단거리 경로가 오히려 7분 느리다
-const 빠른경로 = { risks: FAST, durationMin: 72 };
-const 저부담경로 = { risks: SAFE, durationMin: 65 };
+// 실측(data/route-data.json): 5.16도로 80분 / 평화로 71분 — 최단거리 경로가 오히려 9분 느리다
+const 빠른경로 = { risks: FAST, durationMin: 80 };
+const 저부담경로 = { risks: SAFE, durationMin: 71 };
 
 const a = scoreRoutes(초보, 빠른경로, 저부담경로);
 const b = scoreRoutes(베테랑, 빠른경로, 저부담경로);
@@ -67,8 +67,8 @@ assert.deepEqual(scoreRoutes(초보, 빠른경로, 저부담경로), a);
 
 const 이름 = { fast: "5.16도로 경유", safe: "평화로 경유" };
 const 경로 = {
-  fast: { name: 이름.fast, risks: FAST, durationMin: 72 },
-  safe: { name: 이름.safe, risks: SAFE, durationMin: 65 },
+  fast: { name: 이름.fast, risks: FAST, durationMin: 80 },
+  safe: { name: 이름.safe, risks: SAFE, durationMin: 71 },
 };
 const 초보브리핑 = briefing(초보, a, 경로);
 const 베테랑브리핑 = briefing(베테랑, b, 경로);
@@ -87,7 +87,7 @@ assert.ok(베테랑브리핑[0].startsWith(이름.safe));
 
 // 시간 손해를 문장에서 밝힌다 — 이 시나리오의 핵심 사실
 for (const b of [초보브리핑, 베테랑브리핑]) {
-  assert.ok(b[0].includes("7분"), `최단거리 경로의 시간 손해가 문장에 없음: ${b[0]}`);
+  assert.ok(b[0].includes("9분"), `최단거리 경로의 시간 손해가 문장에 없음: ${b[0]}`);
 }
 
 // 미확보 상태인 risk.value가 문장에 새어나가지 않는다

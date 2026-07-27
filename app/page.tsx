@@ -211,9 +211,9 @@ function Verified({
         </div>
       </section>
 
-      <p className="text-xs text-slate-400">소요시간·거리 출처: {fast.durationSource}</p>
-      <p className="text-xs text-amber-600">
-        ⚠️ 위험요인의 위치·수치·출처는 아직 미확보 상태입니다 (경로 좌표는 임시)
+      <p className="text-xs text-slate-400">소요시간·거리·경로좌표 출처: {fast.durationSource}</p>
+      <p className="text-xs text-slate-400">
+        사고다발·급경사는 경로를 구분할 수 있는 데이터를 확보하지 못해 요인에서 제외했습니다.
       </p>
     </>
   );

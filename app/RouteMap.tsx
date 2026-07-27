@@ -59,6 +59,29 @@ export default function RouteMap({ center, level = 10, routes, markers = [] }: P
       ...markers.map((m) => new kakao.maps.Marker({ position: pt(m.coord), title: m.label })),
     ];
     drawn.current.forEach((o) => o.setMap(map.current));
+
+    // 경로 전체가 담기도록 맞춘다 — level을 시나리오마다 손으로 고르면
+    // 컨테이너 폭이 달라질 때 한쪽 경로가 화면 밖으로 나간다.
+    const all = routes.flatMap((r) => r.path);
+    if (!all.length) return;
+    const lat = all.map((p) => p[0]);
+    const lng = all.map((p) => p[1]);
+    const bounds = new kakao.maps.LatLngBounds(
+      new kakao.maps.LatLng(Math.min(...lat), Math.min(...lng)),
+      new kakao.maps.LatLng(Math.max(...lat), Math.max(...lng)),
+    );
+
+    // 컨테이너 크기가 0인 동안 맞추면 축척이 터진다 (제주 대신 한반도가 보인다).
+    // 첫 렌더에 폭이 0일 수 있고, 창 크기가 바뀌어도 다시 맞춰야 하므로 관찰한다.
+    const fit = () => {
+      if (!box.current?.clientWidth || !box.current.clientHeight) return;
+      map.current.relayout();
+      map.current.setBounds(bounds, 24, 24, 24, 24);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box.current);
+    return () => ro.disconnect();
   }, [sdk, shape]);
 
   const notice = !KEY

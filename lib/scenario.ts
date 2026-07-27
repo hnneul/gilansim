@@ -1,25 +1,33 @@
 // 시나리오 데이터 — PLAN.md §6
 //
-// ⚠️ 아래 값은 전부 임시다.
-//   · 좌표는 눈대중 (§6: 소요시간 검증 전까지 확정하지 않는다)
-//   · 위험요인의 위치·수치·출처가 모두 미확보 상태다
-//   · source 문자열이 화면에 그대로 노출되므로 미검증임이 드러난다
-// 팀원이 TAAS·도로교통공단 자료를 가져오면 이 파일만 교체하면 된다.
+// 경로 좌표·소요시간·위험요인 수치가 모두 실데이터다.
+// 생성 과정은 scripts/build-route-data.mjs 에 있고, 산출물은 data/route-data.json 이다.
+//   · 경로 좌표: 카카오모빌리티 길찾기 API 응답 vertexes (지도 표시용으로 30m 축약)
+//   · 급커브: 위 좌표의 곡률을 직접 계산 (급커브 구간을 공개하는 데이터셋이 없다)
+//   · 차로수·제한속도: 표준노드링크 2026-07-16 (국가교통정보센터)
+//
+// 남은 미확보 요인 — 원칙에 따라 아예 넣지 않는다:
+//   · accidentZone : 공개 사고다발지역 데이터가 보행자·어린이·노인 유형뿐이라
+//                    두 경로가 같은 지점(서귀포 시내)만 잡혀 경로를 구분하지 못한다
+//   · steepSlope   : 고도(DEM) 미확보
+//   · complexJunction : 경로상 4갈래+ 교차로가 168개 / 174개로 차이가 없어 폐기
 
 import type { LatLng } from "@/app/RouteMap";
 import type { RiskFactor } from "./score";
-
-const 미확보 = "⚠️ 출처 미확보 — 실데이터 아님";
+import DATA from "@/data/route-data.json";
 
 /**
  * 소요시간·거리 출처: 카카오모빌리티 길찾기 API (미래 운행 정보, 2026-07-28 10:00 출발 기준)
  *
  * 실측 결과 — §6이 우려하던 "평화로가 더 빠른" 경우가 실제로 확인됐다:
- *   5.16도로 43.1km / 72분   ← 최단거리. 하지만 하루 어느 시간대에도 더 느리다(08~21시 +6~10분)
- *   평화로   52.5km / 65분   ← 최단시간
+ *   5.16도로 43.1km / 80분   ← 최단거리(priority=DISTANCE). 하지만 9분 더 걸린다
+ *   평화로   52.6km / 71분   ← 최단시간(priority=TIME)
  * 즉 5.16도로는 "빠른 경로"가 아니라 "내비가 최단거리로 안내하는 경로"다.
  */
 const 경로출처 = "카카오모빌리티 길찾기 API (2026-07-28 10:00 출발)";
+
+const 곡률출처 = "경로좌표 곡률 계산 (카카오모빌리티 길찾기 API) · 표준노드링크 2026-07-16 제한속도 50km/h↑ 구간";
+const 노드링크출처 = "표준노드링크 2026-07-16 (국가교통정보센터)";
 
 /** PLAN.md §4 Route */
 export type Route = {
@@ -53,34 +61,26 @@ const FAST: Route = {
   name: "5.16도로 경유",
   badge: "내비 최단거리",
   color: "#fb923c",
-  durationMin: 72,
-  distanceKm: 43.1,
+  durationMin: DATA.fast.durationMin,
+  distanceKm: DATA.fast.distanceKm,
   durationSource: 경로출처,
-  path: [공항, [33.489, 126.5219], [33.44, 126.557], [33.385, 126.613], 서귀포시청],
+  path: DATA.fast.path as LatLng[],
   risks: [
     {
-      type: "accidentZone",
-      label: "5.16도로 사고다발구간",
-      location: "성판악 부근",
-      coord: [33.385, 126.613],
-      value: "미확보",
-      source: 미확보,
-    },
-    {
       type: "sharpCurve",
-      label: "연속 급커브",
-      location: "산천단~성판악",
-      coord: [33.44, 126.557],
-      value: "미확보",
-      source: 미확보,
+      label: "5.16도로 연속 급커브",
+      location: `산천단~성판악 (5km 내 ${DATA.fast.sharpCurve.densest!.count}곳)`,
+      coord: DATA.fast.sharpCurve.densest!.at as LatLng,
+      value: `곡선반경 100m 미만 급커브 ${DATA.fast.sharpCurve.byRoad["516로"]}곳`,
+      source: 곡률출처,
     },
     {
-      type: "steepSlope",
-      label: "급경사 내리막",
-      location: "성판악~서귀포",
-      coord: [33.33, 126.6],
-      value: "미확보",
-      source: 미확보,
+      type: "narrowRoad",
+      label: "좁은 교행 구간",
+      location: `5.16도로 (${DATA.fast.narrow.byRoad["516로"]}km)`,
+      coord: DATA.fast.narrow.at as LatLng,
+      value: `차로수 1 구간 ${DATA.fast.narrow.km}km (전체 ${DATA.fast.distanceKm}km 중 ${Math.round((DATA.fast.narrow.km / DATA.fast.distanceKm) * 100)}%)`,
+      source: 노드링크출처,
     },
   ],
 };
@@ -90,26 +90,26 @@ const SAFE: Route = {
   name: "평화로 경유",
   badge: "맞춤 저부담",
   color: "#38bdf8",
-  durationMin: 65,
-  distanceKm: 52.5,
+  durationMin: DATA.safe.durationMin,
+  distanceKm: DATA.safe.distanceKm,
   durationSource: 경로출처,
-  path: [공항, [33.47, 126.46], [33.41, 126.39], [33.33, 126.35], [33.26, 126.42], 서귀포시청],
+  path: DATA.safe.path as LatLng[],
   risks: [
-    {
-      type: "complexJunction",
-      label: "동광 교차로",
-      location: "평화로 중간",
-      coord: [33.33, 126.35],
-      value: "미확보",
-      source: 미확보,
-    },
     {
       type: "highSpeed",
       label: "고속주행 구간",
-      location: "평화로 전 구간",
-      coord: [33.41, 126.39],
-      value: "미확보",
-      source: 미확보,
+      location: `평화로 ${DATA.safe.highSpeed.byRoad["평화로"]}km · 중산간서로 ${DATA.safe.highSpeed.byRoad["중산간서로"]}km`,
+      coord: DATA.safe.highSpeed.at as LatLng,
+      value: `제한속도 80km/h 구간 ${DATA.safe.highSpeed.km}km (전체 ${DATA.safe.distanceKm}km 중 ${Math.round((DATA.safe.highSpeed.km / DATA.safe.distanceKm) * 100)}%)`,
+      source: 노드링크출처,
+    },
+    {
+      type: "narrowRoad",
+      label: "좁은 교행 구간",
+      location: `평화로 (${DATA.safe.narrow.byRoad["평화로"]}km)`,
+      coord: DATA.safe.narrow.at as LatLng,
+      value: `차로수 1 구간 ${DATA.safe.narrow.km}km (전체 ${DATA.safe.distanceKm}km 중 ${Math.round((DATA.safe.narrow.km / DATA.safe.distanceKm) * 100)}%)`,
+      source: 노드링크출처,
     },
   ],
 };

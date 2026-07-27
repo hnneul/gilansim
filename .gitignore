@@ -43,3 +43,10 @@ next-env.d.ts
 # 문서 (기획/계획 문서는 레포에 올리지 않음)
 *.md
 !README.md
+
+# GIS 중간 산출물 — 표준노드링크 전국 데이터(257MB zip)에서 잘라낸 것.
+# scripts/build-route-data.mjs 주석의 ogr2ogr 명령으로 다시 만든다.
+# 최종 산출물 data/route-data.json 은 작아서 커밋한다.
+/data/*.geojson
+/data/route-DISTANCE.json
+/data/route-TIME.json

@@ -73,7 +73,7 @@ export default function Home() {
           <input
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
-            placeholder="예: 성산일출봉, 협재해수욕장"
+            placeholder="예: 서귀포 올레시장, 성산일출봉"
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800"
           />
         </label>

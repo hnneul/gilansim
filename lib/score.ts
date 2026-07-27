@@ -76,14 +76,24 @@ export const exposureFactor = (exposure: number) =>
   Math.min(EXPOSURE_MAX, Math.max(EXPOSURE_MIN, exposure / EXPOSURE_REFERENCE));
 
 /**
- * 프로필 가중치(곱). SUV는 좁은 교행로에만 걸린다 — 차가 크다고 급커브가 더 위험하진 않다.
+ * 프로필 가중치(곱). 차량 크기는 좁은 교행로에만 걸린다 — 차가 크다고 급커브가 더 위험하진 않다.
+ *
+ * vehicleSize는 차종이 아니라 차폭 구간이다 — "suv"는 대형(쏘렌토 1.90m급 이상)을 뜻한다.
+ * 차종으로 나누면 역전이 생긴다: 캐스퍼(경형 SUV) 1.60m < 쏘나타(중형 세단) 1.86m.
+ * 입력 화면의 라벨과 근거 카드 문구가 이 의미를 따라야 한다.
  *
  * 고속주행은 경력이 쌓이면 부담이 크게 줄지만 0이 되지는 않는다.
  * 요인을 아예 제거하면 근거 카드가 한 줄로 비어 "왜 이 경로인지"를 설명하지 못한다.
  */
+/**
+ * 초보 판정. 가중치와 주차 안내가 같은 기준을 써야 한다 —
+ * 임계값을 양쪽에 따로 박아두면 한쪽만 바뀌어 화면이 서로 다른 말을 한다.
+ */
+export const isNovice = (p: DriverProfile) => p.experienceYears <= 1;
+
 function weight(type: RiskType, p: DriverProfile): number {
   let w = 1;
-  if (p.experienceYears <= 1) w *= 1.3;
+  if (isNovice(p)) w *= 1.3;
   if (p.drivingFrequency === "low") w *= 1.3;
   if (!p.jejuExperience) w *= 1.2;
   if (p.timeOfDay === "night") w *= 1.15;
@@ -95,11 +105,11 @@ function weight(type: RiskType, p: DriverProfile): number {
 /** 근거 카드 머리말용 — 지금 켜져 있는 가중치 조건 목록 */
 export function activeWeights(p: DriverProfile): string[] {
   const out: string[] = [];
-  if (p.experienceYears <= 1) out.push("운전경력 1년 이하 ×1.3");
+  if (isNovice(p)) out.push("운전경력 1년 이하 ×1.3");
   if (p.drivingFrequency === "low") out.push("최근 운전빈도 낮음 ×1.3");
   if (!p.jejuExperience) out.push("제주 운전경험 없음 ×1.2");
   if (p.timeOfDay === "night") out.push("야간 주행 ×1.15");
-  if (p.vehicleSize === "suv") out.push("SUV ×1.4 (좁은 교행로에만)");
+  if (p.vehicleSize === "suv") out.push("대형 차량 ×1.4 (좁은 교행로에만)");
   if (p.experienceYears > 1) out.push("경력 1년 초과 ×0.4 (고속주행에만)");
   return out;
 }
@@ -129,7 +139,7 @@ export function scoreRoutes(
   const safe = scoreRoute(safeRoute.risks, profile);
 
   // 최단거리 경로가 시간까지 이득인가.
-  // 제주공항→서귀포시청 실측에서는 5.16도로가 오히려 6~10분 느려 항상 false다.
+  // 제주공항→서귀포 올레시장 실측에서는 5.16도로가 오히려 5분 느려 항상 false다.
   const fastIsQuicker =
     fastRoute.durationMin != null &&
     safeRoute.durationMin != null &&

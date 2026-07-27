@@ -16,14 +16,16 @@
 
 import type { LatLng } from "@/app/RouteMap";
 import type { RiskFactor } from "./score";
+import type { Parking } from "./parking";
 import DATA from "@/data/route-data.json";
+import PARKING from "@/data/parking-data.json";
 
 /**
  * 소요시간·거리 출처: 카카오모빌리티 길찾기 API (미래 운행 정보, 2026-07-28 10:00 출발 기준)
  *
  * 실측 결과 — §6이 우려하던 "평화로가 더 빠른" 경우가 실제로 확인됐다:
- *   5.16도로 43.1km / 80분   ← 최단거리(priority=DISTANCE). 하지만 9분 더 걸린다
- *   평화로   52.6km / 71분   ← 최단시간(priority=TIME)
+ *   5.16도로 43.0km / 64분   ← 최단거리(priority=DISTANCE). 하지만 5분 더 걸린다
+ *   평화로   53.1km / 59분   ← 최단시간(priority=TIME)
  * 즉 5.16도로는 "빠른 경로"가 아니라 "내비가 최단거리로 안내하는 경로"다.
  */
 const 경로출처 = "카카오모빌리티 길찾기 API (2026-07-28 10:00 출발)";
@@ -57,7 +59,8 @@ export type Scenario = {
 };
 
 const 공항: LatLng = [33.507, 126.493];
-const 서귀포시청: LatLng = [33.2541, 126.5601];
+// 카카오 로컬 API 키워드 검색 (서귀포시 중앙로62번길 18)
+const 올레시장: LatLng = [33.2502, 126.5632];
 
 const FAST: Route = {
   id: "fast",
@@ -121,16 +124,29 @@ const SAFE: Route = {
   ],
 };
 
+/**
+ * 목적지 주차장. 경로 위험요인과 달리 경로 검증과 무관하므로 미검증 구간에서도 보여준다.
+ * 판정 로직은 lib/parking.ts, 데이터 생성은 scripts/build-parking-data.mjs.
+ */
+export const PARKING_SOURCE = `${PARKING.source} · 주차장유형(노상/노외)을 평행·직각 주차 프록시로 사용`;
+
+export function parkingFor(scenarioId: string): Parking | null {
+  // JSON 임포트는 좌표를 number[] 로 넓혀 읽어서 [number, number] 튜플과 겹치지 않는다.
+  // 생성 쪽(build-parking-data.mjs)이 항상 두 개를 넣으므로 여기서 좁혀준다.
+  const d = (PARKING.byDestination as unknown as Record<string, Parking | undefined>)[scenarioId];
+  return d && d.total > 0 ? d : null;
+}
+
 export const SCENARIOS: Scenario[] = [
   {
     id: "seogwipo",
-    label: "제주공항 → 서귀포시청",
+    label: "제주공항 → 서귀포 매일올레시장",
     verified: true,
     center: [33.38, 126.53],
     level: 10,
     markers: [
       { coord: 공항, label: "제주국제공항" },
-      { coord: 서귀포시청, label: "서귀포시청" },
+      { coord: 올레시장, label: "서귀포 매일올레시장" },
     ],
     routes: [FAST, SAFE],
   },

@@ -8,7 +8,7 @@
 import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parallelOdds, recommendedSpots, type Parking, type ParkingSpot } from "./parking.ts";
+import { parallelOdds, recommendedSpots, nearestSpots, type Parking, type ParkingSpot } from "./parking.ts";
 
 const DATA = JSON.parse(readFileSync(fileURLToPath(new URL("../data/parking-data.json", import.meta.url)), "utf8"));
 
@@ -33,42 +33,39 @@ assert.equal(parallelOdds(make(5, 0)).level, "high"); // 전부 노상 = 최악
 assert.ok(!parallelOdds(make(5, 0)).detail.includes("먼저"));
 assert.ok(parallelOdds(make(5, 1)).detail.includes("먼저"));
 
-// --- 경력별 문구 ---
-// 숫자 판정은 경력과 무관해야 한다. 말투만 갈린다 — 판정까지 갈리면 같은 주차장을 두 개로 세는 셈이다.
+// --- 화면 문구 ---
+// "노상·노외"는 주차장법 제2조 법령 용어라 일반 운전자가 안 쓰는 말이다.
+// 데이터 값과 출처에는 남기되, 사용자가 읽는 문장에는 넣지 않는다.
 for (const [on, off] of [[0, 25], [1, 24], [13, 12], [5, 0]] as const) {
-  const 초보 = parallelOdds(make(on, off), true);
-  const 경력자 = parallelOdds(make(on, off), false);
-  assert.equal(초보.level, 경력자.level, `level이 경력에 따라 달라졌다 (노상 ${on})`);
-  assert.equal(초보.onStreet, 경력자.onStreet);
-  assert.equal(초보.offStreet, 경력자.offStreet);
-  assert.notEqual(초보.headline, 경력자.headline, `헤드라인이 안 갈렸다 (노상 ${on})`);
+  const o = parallelOdds(make(on, off));
+  for (const 문장 of [o.headline, o.detail])
+    assert.ok(!/노상|노외/.test(문장), `법령 용어가 화면 문구에 샜다: "${문장}"`);
 }
 
-// 경력자에게는 권유하지 않는다 — 안 지킬 조언은 경고의 신뢰도만 깎는다
-assert.ok(!parallelOdds(make(5, 1), false).detail.includes("먼저"));
-assert.ok(!parallelOdds(make(1, 24), false).detail.includes("피할 수 있습니다"));
-assert.ok(parallelOdds(make(1, 24), true).detail.includes("피할 수 있습니다"));
-
-// 사실(구획 수·비율)은 양쪽 모두에 남는다 — 말투를 낮추면서 숫자까지 빼면 안 된다
-for (const novice of [true, false]) {
-  const d = parallelOdds(make(13, 12), novice).detail;
-  assert.ok(d.includes("13곳") && d.includes("52%"), `사실이 빠졌다 (novice=${novice})`);
-}
-
-// 기본값은 초보 — 인자를 잊은 호출이 경고를 약하게 만들면 안 된다
-assert.deepEqual(parallelOdds(make(13, 12)), parallelOdds(make(13, 12), true));
+// 사실(구획 수·비율)은 문구를 쉽게 풀어도 남아야 한다
+const d1312 = parallelOdds(make(13, 12)).detail;
+assert.ok(d1312.includes("13곳") && d1312.includes("52%"), "사실이 빠졌다");
 
 // 개수는 유형 합계가 아니라 total 기준 — 부설 등 제3의 유형이 들어와도 노상이 아니면 노상이 아니다
 const withOther: Parking = { ...make(2, 0), total: 10, byType: { 노상: 2 } };
 assert.equal(parallelOdds(withOther).offStreet, 8);
 assert.equal(parallelOdds(withOther).level, "mixed");
 
-// 추천은 노상을 빼고 가까운 순
+// 초보 추천은 노상을 빼고 가까운 순
 const rec = recommendedSpots(make(3, 5));
 assert.equal(rec.length, 3);
 assert.ok(rec.every((s) => s.type !== "노상"), "노상을 추천하면 안 된다");
 assert.deepEqual(rec.map((s) => s.walkM), [500, 510, 520]);
 assert.equal(recommendedSpots(make(5, 0)).length, 0);
+
+// 경력자 목록은 유형을 안 가린다 — 평행/직각이 상관없는 사람에게 노상을 숨기면
+// 가장 가까운 주차장을 빼앗는 셈이다
+const near = nearestSpots(make(3, 5));
+assert.equal(near.length, 5);
+assert.ok(near.some((s) => s.type === "노상"), "경력자에게는 노상도 보여야 한다");
+assert.deepEqual(near.map((s) => s.walkM), [0, 10, 20, 500, 510], "가까운 순이 아니다");
+// 노상뿐인 목적지에서도 빈손으로 돌려보내지 않는다 (recommendedSpots 는 0곳이 되는 경우)
+assert.equal(nearestSpots(make(5, 0)).length, 5);
 
 // --- ② 프록시 근거 (data/parking-data.json) ---
 const { 노상: on, 노외: off } = DATA.stats;

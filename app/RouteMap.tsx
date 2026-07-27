@@ -13,7 +13,13 @@ declare global {
 
 export type LatLng = [number, number]; // [위도, 경도]
 export type MapRoute = { path: LatLng[]; color: string; weight?: number; opacity?: number };
-export type MapMarker = { coord: LatLng; label: string };
+
+/**
+ * 마커 아이콘. src 는 data: URI 를 넣는다 — 인라인 SVG면 파일도 외부 요청도 안 늘어난다.
+ * anchor 를 안 주면 이미지 가운데를 좌표에 맞춘다 (핀 모양이면 뾰족한 끝을 직접 지정할 것).
+ */
+export type MarkerIcon = { src: string; size: [number, number]; anchor?: [number, number] };
+export type MapMarker = { coord: LatLng; label: string; icon?: MarkerIcon };
 
 type Props = {
   center: LatLng;
@@ -56,14 +62,26 @@ export default function RouteMap({ center, level = 10, routes, markers = [] }: P
             strokeOpacity: r.opacity ?? 0.9,
           }),
       ),
-      ...markers.map((m) => new kakao.maps.Marker({ position: pt(m.coord), title: m.label })),
+      ...markers.map((m) => {
+        const [w, h] = m.icon?.size ?? [0, 0];
+        return new kakao.maps.Marker({
+          position: pt(m.coord),
+          title: m.label,
+          image:
+            m.icon &&
+            new kakao.maps.MarkerImage(m.icon.src, new kakao.maps.Size(w, h), {
+              offset: new kakao.maps.Point(...(m.icon.anchor ?? [w / 2, h / 2])),
+            }),
+        });
+      }),
     ];
     drawn.current.forEach((o) => o.setMap(map.current));
 
     // 경로 전체가 담기도록 맞춘다 — level을 시나리오마다 손으로 고르면
     // 컨테이너 폭이 달라질 때 한쪽 경로가 화면 밖으로 나간다.
-    const all = routes.flatMap((r) => r.path);
-    if (!all.length) return;
+    // 경로가 없으면(주차 미니 지도 등) 마커에 맞춘다 — 축척을 손으로 고를 필요가 없다.
+    const all = routes.length ? routes.flatMap((r) => r.path) : markers.map((m) => m.coord);
+    if (all.length < 2) return; // 한 점뿐이면 맞출 게 없다 — center/level 을 그대로 쓴다
     const lat = all.map((p) => p[0]);
     const lng = all.map((p) => p[1]);
     const bounds = new kakao.maps.LatLngBounds(

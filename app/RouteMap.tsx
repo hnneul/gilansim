@@ -1,6 +1,5 @@
 "use client";
 
-import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 
 // ponytail: 카카오 SDK는 타입 정의가 없어 any로 둔다.
@@ -30,6 +29,28 @@ type Props = {
 
 const KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
 
+/**
+ * SDK 로딩. 한 화면에 지도가 여러 개(메인·주차·착한가격)라도 스크립트는 하나면 되므로
+ * 모듈 전역 프로미스 하나로 묶는다. 인스턴스마다 resolve 를 나눠 받는다.
+ *
+ * next/script 를 쓰지 않는 이유 — 같은 src 를 LoadCache 로 묶는 규칙이 인스턴스 수에 따라
+ * 갈린다 (node_modules/next/dist/client/script.js): 세 번째부터는 onLoad 가 안 오고,
+ * onReady 는 스크립트가 아직 로딩 중인데도 불려서 window.kakao 가 undefined 다.
+ * 지도가 셋이 되는 순간 둘 다 밟았다. 스크립트 태그 하나 붙이는 일에 맞출 규칙이 아니다.
+ */
+let sdkPromise: Promise<void> | undefined;
+
+function loadSdk() {
+  return (sdkPromise ??= new Promise<void>((resolve, reject) => {
+    const s = document.createElement("script");
+    // autoload=false — 로드 직후 maps.load() 로 직접 초기화한다
+    s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KEY}&autoload=false`;
+    s.onload = () => window.kakao.maps.load(resolve);
+    s.onerror = reject;
+    document.head.append(s);
+  }));
+}
+
 export default function RouteMap({ center, level = 10, routes, markers = [] }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<any>(null);
@@ -39,10 +60,14 @@ export default function RouteMap({ center, level = 10, routes, markers = [] }: P
   // 배열 prop이 매 렌더 새 참조라 의존성으로 직접 못 쓴다
   const shape = JSON.stringify({ center, level, routes, markers });
 
-  // 리마운트 시에는 Script가 이미 로드돼 있어 onLoad가 다시 불리지 않는다
   useEffect(() => {
-    if (sdk === "loading" && window.kakao?.maps) window.kakao.maps.load(() => setSdk("ready"));
-  }, [sdk]);
+    if (!KEY) return;
+    // 이미 로드됐으면 프로미스가 그대로 resolve 돼서, 리마운트에도 다시 뜬다
+    loadSdk().then(
+      () => setSdk("ready"),
+      () => setSdk("error"),
+    );
+  }, []);
 
   useEffect(() => {
     if (sdk !== "ready" || !box.current) return;
@@ -112,13 +137,6 @@ export default function RouteMap({ center, level = 10, routes, markers = [] }: P
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl bg-slate-100">
-      {KEY && (
-        <Script
-          src={`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KEY}&autoload=false`}
-          onLoad={() => window.kakao.maps.load(() => setSdk("ready"))}
-          onError={() => setSdk("error")}
-        />
-      )}
       <div ref={box} className="h-full w-full" />
       {notice && <Notice>{notice}</Notice>}
     </div>

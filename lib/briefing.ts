@@ -1,16 +1,9 @@
-// 출발 전 브리핑 — PLAN.md §3 ④
+// 운전자 맞춤 해석 · 경로별 판정 — PLAN.md §3 ④
 //
 // 폴백 경로다. AI 없이 계산 결과만으로 문장을 조립하므로 인터넷이 끊겨도 동작한다.
 // AI 연동 시에는 이 함수가 실패·지연 시의 대체 경로가 된다.
 
-import {
-  COMFORT_THRESHOLD,
-  activeWeights,
-  type DriverProfile,
-  type RiskFactor,
-  type RiskType,
-  type ScoreResult,
-} from "./score.ts";
+import { isNovice, type DriverProfile, type RiskFactor, type RiskType, type ScoreResult } from "./score.ts";
 
 // 요인 종류별 대응 행동.
 // 이 문장들은 출처가 필요 없다 — 위험요인의 존재를 주장하는 게 아니라
@@ -105,64 +98,73 @@ export function verdict(
 
 type RouteLike = { name: string; risks: RiskFactor[]; durationMin: number | null };
 
-/** 2~3문장. risk.value는 쓰지 않는다 — 아직 "미확보"라 문장에 넣으면 거짓이 된다. */
+/**
+ * 프로필을 사람 말 한 조각으로. activeWeights 는 계산 근거("운전경력 1년 이하 ×1.3")라
+ * 해석 문장에 그대로 쓸 수 없다 — 가중치 목록은 근거 자리에서 이미 그 일을 한다.
+ *
+ * 조건이 여러 개여도 하나만 쓴다. 한국어에서 절을 이어 붙이면("운전을 시작한 지 얼마 안 됐고
+ * 제주 운전이 처음이고 밤이라면") 문장만 길어지고 어느 조건이 무거운지도 흐려진다.
+ * 순서는 가중치가 큰 것부터다 (lib/score.ts 의 weight).
+ */
+function 조건말(p: DriverProfile): string {
+  if (isNovice(p)) return "운전을 시작한 지 얼마 안 됐다면";
+  if (p.drivingFrequency === "low") return "요즘 운전을 자주 하지 않았다면";
+  if (!p.jejuExperience) return "제주 도로가 처음이라면";
+  if (p.vehicleSize === "suv") return "차가 큰 편이라면";
+  if (p.timeOfDay === "night") return "밤에 달린다면";
+  return ""; // 경력자·주간·소형차 — 굳이 붙일 조건이 없다
+}
+
+/**
+ * 운전자 맞춤 해석 2~3문장 — AI 문장(lib/ai.ts 의 briefing)을 못 받았을 때 쓴다.
+ *
+ * 점수와 임계값을 읊지 않는다. 이 문장이 앉는 자리는 부담점수를 이미 큰 글씨로 보여주는
+ * 화면이고, 여기서 알고 싶은 건 "50점을 넘었다"가 아니라 "내 조건에서 이 길이 어떤 길이냐"다.
+ * 세 문장이 각각 누구에게 어떤 길인지 · 거기서 무슨 일이 생기는지 · 그러면 어떻게 하는지다.
+ *
+ * risk.value는 쓰지 않는다 — 아직 "미확보"라 문장에 넣으면 거짓이 된다.
+ */
 export function briefing(
   profile: DriverProfile,
   result: ScoreResult,
   routes: { fast: RouteLike; safe: RouteLike },
 ): string[] {
-  const { recommendedRoute: pick, fastScore, safeScore } = result;
-  const target = pick === "safe" ? "safe" : "fast"; // 실제로 달릴 경로를 브리핑한다
+  const { recommendedRoute: pick } = result;
+  const target = pick === "safe" ? "safe" : "fast"; // 실제로 달릴 경로를 설명한다
   const name = { fast: routes.fast.name, safe: routes.safe.name };
+  const 조건 = 조건말(profile);
+  const 앞 = 조건 ? `${조건} ` : "";
 
-  // 최단거리 경로가 시간까지 손해인 경우 — 그 사실을 먼저 말한다
+  // 시간 차이는 남긴다 — 점수와 달리 설명 없이 바로 아는 정보다
   const gap =
     routes.fast.durationMin != null && routes.safe.durationMin != null
       ? routes.fast.durationMin - routes.safe.durationMin
       : null;
-  const 시간손해 = gap != null && gap > 0;
+  const 빠른분 = gap == null ? null : target === "safe" ? gap : -gap;
 
-  // 부담이 임계값을 넘으면 강한 권고, 넘지 않으면 "굳이 선택할 이유가 없다"는 약한 권고
-  const 강함 = fastScore > COMFORT_THRESHOLD;
-
-  // pick 을 먼저 본다. 전에는 시간손해로 문장을 갈랐는데, 그건 추천을 두 번 계산하는 것이고
-  // 실제로 어긋났다 — 부담 차이가 없어 추천을 접은 구간(pick "single")에서도 시간손해만 보고
-  // "평화로를 추천합니다"를 썼다. 추천은 lib/score.ts 한 곳에서만 정한다.
+  // 추천은 lib/score.ts 한 곳에서만 정한다 — 여기서 시간·점수를 다시 보고 갈라선 안 된다.
   const lead =
     pick === "single"
-      ? `두 경로의 부담 차이가 크지 않습니다(${fastScore}점 / ${safeScore}점). 익숙한 경로를 이용하세요.`
-      : pick === "safe"
-        ? 시간손해
-          ? 강함
-            ? `${name.safe}를 추천합니다. ${name.fast}는 거리가 짧지만 ${gap}분 더 걸리고, 부담점수도 ${fastScore}점으로 편안 임계값 ${COMFORT_THRESHOLD}점을 넘습니다.`
-            : `${name.safe}를 추천합니다. ${name.fast}의 부담점수 ${fastScore}점은 감당할 수 있는 수준이지만, ${gap}분 더 걸려 굳이 선택할 이유가 없습니다.`
-          : `${name.safe}를 추천합니다. ${name.fast}는 부담점수 ${fastScore}점으로 편안 임계값 ${COMFORT_THRESHOLD}점을 넘었습니다.`
-        : 시간손해
-          ? `${name.fast}를 추천합니다. ${gap}분 더 걸리지만 부담점수가 ${fastScore}점으로 ${name.safe}(${safeScore}점)보다 낮습니다.`
-          : `${name.fast}를 추천합니다. 부담점수 ${fastScore}점으로 편안 임계값 ${COMFORT_THRESHOLD}점 이하입니다.`;
+      ? `${앞}두 경로가 비슷합니다. 어느 쪽으로 가도 크게 다르지 않으니 익숙한 길로 가세요.`
+      : `${앞}두 경로 중에서는 ${name[target]}${이가(name[target])} 편합니다.` +
+        (빠른분 != null && 빠른분 > 0 ? ` ${빠른분}분 빠르기도 합니다.` : "");
 
-  // §4 breakdown은 factor(이름)만 담으므로 Route.risks에서 원본을 되짚는다
+  // §4 breakdown은 factor(이름)만 담으므로 Route.risks에서 원본을 되짚는다.
+  // 하나만 고른다 — 신경 쓸 곳을 둘 알려주면 둘 다 흐려진다. 나머지는 경로 카드가 보여준다.
   const top = result.breakdown
     .filter((r) => r.route === target)
     .sort((a, b) => b.weighted - a.weighted)
-    .slice(0, 2)
     .map((r) => routes[target].risks.find((x) => x.label === r.factor))
-    .filter((r): r is RiskFactor => !!r);
+    .find((r): r is RiskFactor => !!r);
 
-  const spot = (r: RiskFactor) => {
-    const loc = r.location.trim();
-    return loc && loc !== "-" ? `${loc}의 ${r.label}` : r.label;
-  };
+  if (!top) return [lead, `${name[target]}에는 확인된 위험요인이 없습니다.`];
 
-  const watch = top.length
-    ? `${name[target]}에서 부담이 가장 큰 곳은 ${top.map(spot).join(", ")}입니다. ` +
-      [...new Set(top.map((r) => ACTION[r.type]))].join(" ")
-    : `${name[target]}에는 확인된 위험요인이 없습니다.`;
-
-  const conditions = activeWeights(profile).map((s) => s.replace(/\s*×.*$/, ""));
-  const why = conditions.length
-    ? `${conditions.join(" · ")} 조건이 반영된 결과입니다.`
-    : `추가 가중치 없이 기본 점수 그대로 계산된 결과입니다.`;
-
-  return [lead, watch, why];
+  const loc = top.location.trim();
+  const 어디 = loc && loc !== "-" ? `${loc}의 ` : "";
+  return [
+    lead,
+    `${name[target]}에서 가장 신경 쓸 곳은 ${어디}${top.label}입니다. 경로의 ${Math.round(top.exposure * 100)}%를 차지합니다.`,
+    // WHY 는 두 문장인 것도 있다 — 첫 문장이 "무슨 일이 생기는가"고 나머지는 경로 카드가 보여준다
+    `${WHY[top.type].match(/^.*?\./)?.[0] ?? WHY[top.type]} ${ACTION[top.type]}`,
+  ];
 }

@@ -123,12 +123,23 @@ const 역전브리핑 = briefing(초보, 역전, {
   fast: { name: "가벼운길", risks: 작은부담.risks, durationMin: 60 },
   safe: { name: "무거운길", risks: 큰부담.risks, durationMin: 60 },
 });
-assert.ok(역전브리핑[0].startsWith("가벼운길"), `브리핑이 추천과 어긋난다: ${역전브리핑[0]}`);
+// 문구가 아니라 "어느 경로를 가리키는가"를 본다 — 첫 문장은 조건말("~라면")로 시작할 수 있고,
+// 말투는 앞으로도 바뀐다. 바뀌면 안 되는 건 추천한 경로만 이름이 불린다는 것이다.
+assert.ok(
+  역전브리핑[0].includes("가벼운길") && !역전브리핑[0].includes("무거운길"),
+  `브리핑이 추천과 어긋난다: ${역전브리핑[0]}`,
+);
 const 무의미브리핑 = briefing(초보, 무의미, {
   fast: { name: "가길", risks: 큰부담.risks, durationMin: 60 },
   safe: { name: "나길", risks: 같은부담.risks, durationMin: 60 },
 });
-assert.ok(무의미브리핑[0].includes("차이가 크지 않습니다"), `추천을 접은 구간의 브리핑: ${무의미브리핑[0]}`);
+// 추천을 접었으면 한쪽 이름을 부르지 않고 익숙한 길로 넘긴다
+assert.ok(
+  무의미브리핑[0].includes("익숙한") &&
+    !무의미브리핑[0].includes("가길") &&
+    !무의미브리핑[0].includes("나길"),
+  `추천을 접은 구간의 브리핑: ${무의미브리핑[0]}`,
+);
 
 // --- 노출 크기 반영 ---
 // 같은 종류의 요인이라도 노출이 길면 점수가 커야 한다.
@@ -166,9 +177,11 @@ assert.notDeepEqual(초보브리핑, 베테랑브리핑);
 assert.notEqual(초보브리핑[0], 베테랑브리핑[0], "추천 이유 문장이 프로필에 따라 달라야 한다");
 assert.equal(초보브리핑.length, 3);
 
-// 추천된 경로를 브리핑한다 (실제로 달릴 길)
-assert.ok(초보브리핑[0].startsWith(이름.safe));
-assert.ok(베테랑브리핑[0].startsWith(이름.safe));
+// 추천된 경로만 이름이 불린다 (실제로 달릴 길). startsWith 로 보지 않는 이유는 위와 같다 —
+// 첫 문장이 조건말("~라면")로 시작할 수 있다.
+for (const b of [초보브리핑, 베테랑브리핑]) {
+  assert.ok(b[0].includes(이름.safe) && !b[0].includes(이름.fast), `추천 경로가 아닌 길을 설명한다: ${b[0]}`);
+}
 
 // 시간 손해를 문장에서 밝힌다 — 이 시나리오의 핵심 사실
 for (const b of [초보브리핑, 베테랑브리핑]) {

@@ -249,8 +249,8 @@ function CustomRoutes({
         routes={[line(fast, pick === "fast"), line(safe, pick === "safe")]}
         markers={[origin, dest, ...riskMarkers]}
       >
-        <RailButton glyph="💡" label="팁" tone="bg-emerald-50 text-emerald-900">
-          <p className="text-base font-bold">출발 전 팁</p>
+        <RailButton glyph="💡" label="해석" tone="bg-emerald-50 text-emerald-900">
+          <p className="text-base font-bold">내 조건으로 본 이 길</p>
           <Suspense fallback={<BriefingSkeleton n={규칙브리핑.length} />}>
             <AiBriefing p={ai} fallback={규칙브리핑} />
           </Suspense>
@@ -676,9 +676,10 @@ async function Verified({
         routes={[line(fast, pick === "fast"), line(safe, pick === "safe")]}
         markers={[...scenario.markers, ...riskMarkers]}
       >
-        {/* ④ 출발 전 팁 — AI가 쓰고, 실패하면 규칙 기반 문장으로 떨어진다 */}
-        <RailButton glyph="💡" label="팁" tone="bg-emerald-50 text-emerald-900">
-          <p className="text-base font-bold">출발 전 팁</p>
+        {/* ④ 운전자 맞춤 해석 — 점수가 아니라 "내 조건에서 이 길이 어떤 길인지"를 AI가 풀어 쓴다.
+            실패하면 같은 말투의 규칙 기반 문장으로 떨어진다 (lib/briefing.ts) */}
+        <RailButton glyph="💡" label="해석" tone="bg-emerald-50 text-emerald-900">
+          <p className="text-base font-bold">내 조건으로 본 이 길</p>
           <Suspense fallback={<BriefingSkeleton n={규칙브리핑.length} />}>
             <AiBriefing p={ai} fallback={규칙브리핑} />
           </Suspense>
@@ -840,7 +841,7 @@ function Verdict({
 /** AI를 기다리는 동안. 문장 수만큼 회색 줄을 둬서 뜨는 순간 높이가 튀지 않는다. */
 function BriefingSkeleton({ n }: { n: number }) {
   return (
-    <div className="mt-2 flex animate-pulse flex-col gap-2" aria-label="팁 작성 중">
+    <div className="mt-2 flex animate-pulse flex-col gap-2" aria-label="해석 작성 중">
       {Array.from({ length: n }, (_, i) => (
         <div key={i} className="h-4 rounded bg-emerald-200/60" style={{ width: `${100 - i * 12}%` }} />
       ))}

@@ -148,7 +148,7 @@ function ErrorMain({ reason }: { reason: string }) {
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 p-5 text-slate-800">
       <header className="flex items-baseline gap-3">
         <h1 className="text-2xl font-bold">길 안심 제주</h1>
-        <Link href="/" className="ml-auto shrink-0 text-sm text-slate-500 underline hover:text-slate-800">
+        <Link href="/profile" className="ml-auto shrink-0 text-sm text-slate-500 underline hover:text-slate-800">
           다시 입력
         </Link>
       </header>

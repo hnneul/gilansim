@@ -50,7 +50,7 @@ export default function ProfileMenu({ profile }: { profile: DriverProfile }) {
           </div>
         </div>
         <Link
-          href="/"
+          href="/profile"
           className="mt-3 block border-t border-slate-100 pt-3 font-medium text-slate-700 hover:text-slate-900 hover:underline"
         >
           프로필 재설정

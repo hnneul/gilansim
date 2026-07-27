@@ -12,7 +12,7 @@ declare global {
 }
 
 export type LatLng = [number, number]; // [위도, 경도]
-export type MapRoute = { path: LatLng[]; color: string };
+export type MapRoute = { path: LatLng[]; color: string; weight?: number; opacity?: number };
 export type MapMarker = { coord: LatLng; label: string };
 
 type Props = {
@@ -46,9 +46,9 @@ export default function RouteMap({ center, level = 10, routes, markers = [] }: P
         (r) =>
           new kakao.maps.Polyline({
             path: r.path.map(pt),
-            strokeWeight: 6,
+            strokeWeight: r.weight ?? 6,
             strokeColor: r.color,
-            strokeOpacity: 0.9,
+            strokeOpacity: r.opacity ?? 0.9,
           }),
       ),
       ...markers.map((m) => new kakao.maps.Marker({ position: pt(m.coord), title: m.label })),

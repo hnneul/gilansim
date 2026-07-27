@@ -3,12 +3,14 @@
 // Next 16에서 searchParams는 Promise다 — await 없이 접근하면 못 쓴다.
 // 점수 계산은 순수 함수라 서버에서 그대로 돌아간다. 클라이언트 몫은 지도와 프리셋 버튼뿐이다.
 
+import { Suspense } from "react";
 import Link from "next/link";
 import RouteMap, { type MarkerIcon } from "../RouteMap";
+import { aiSentences, factsOf, type AiSentences } from "@/lib/ai";
 import { scoreRoutes, activeWeights, isNovice, type RiskFactor, type DriverProfile } from "@/lib/score";
 import { briefing } from "@/lib/briefing";
 import { SCENARIOS, parkingFor, PARKING_SOURCE, type Route } from "@/lib/scenario";
-import { parallelOdds, recommendedSpots, type Parking } from "@/lib/parking";
+import { parallelOdds, recommendedSpots, nearestSpots, type Parking, type ParallelOdds } from "@/lib/parking";
 import { parseProfile } from "@/lib/profile";
 import { liveTraffic, congestionLabel, type Live } from "@/lib/traffic";
 
@@ -54,103 +56,154 @@ export default async function ResultPage({
 }
 
 /**
- * 지도 + 목적지 주차 카드를 한 줄로 묶는다. 지도가 뜨는 두 자리(검증·미검증)가 모두
- * 여기를 지나가므로 카드를 한 번만 걸면 된다.
+ * 지도 + 오른쪽 아이콘 레일. 부가 정보를 카드로 나란히 놓으면 그 폭만큼 지도가 좁아져서
+ * 정작 봐야 할 경로가 작게 나온다 — 그래서 아이콘으로 접어 두고 패널만 지도 위로 띄운다.
  *
- * 높이는 **행**이 쥔다 (lg:h-[62vh]). 카드에 stretch만 걸면 카드 내용이 길 때 카드가
- * 행을 늘려버려서 — 지도는 제 높이에 멈추고 그 아래로 흰 공백이 생긴다. 행에 확정 높이가
- * 있어야 카드의 max-h-full 이 기준을 갖고, 넘치는 만큼 카드 안에서 스크롤한다.
- *
- * 높이를 검증/미검증 구간별로 다르게 두던 걸(44vh/38vh) 하나로 합쳤다. 리터럴이어야
- * Tailwind가 클래스를 만들어 주는데, 그 차이는 눈에 띄지도 않는 값이었다.
+ * 지도가 뜨는 두 자리(검증·미검증)가 모두 여기를 지나가므로 주차 버튼은 한 번만 걸면 된다.
+ * 구간별로만 있는 버튼(브리핑)은 children 으로 받아 레일 아래에 붙인다.
+ * 높이는 이 줄이 쥔다 — 패널의 max-h 가 기준으로 삼는 값이다.
  */
 function MapArea({
   scenario,
   profile,
   routes,
   markers,
+  children,
 }: {
   scenario: (typeof SCENARIOS)[number];
   profile: DriverProfile;
+  children?: React.ReactNode;
 } & Pick<React.ComponentProps<typeof RouteMap>, "routes" | "markers">) {
   const parking = parkingFor(scenario.id);
+  // 평행주차 판정은 초보에게만 낸다 — 경력자에겐 노상·노외 구분이 의미가 없다.
+  const odds = parking && isNovice(profile) ? parallelOdds(parking!) : null;
   return (
-    <div className="flex flex-col gap-3 lg:h-[62vh] lg:min-h-[30rem] lg:flex-row">
-      <div className="h-[44vh] min-h-64 min-w-0 flex-1 lg:h-full lg:min-h-0">
+    <div className="flex h-[52vh] min-h-72 w-full gap-2 lg:h-[68vh] lg:min-h-[32rem]">
+      <div className="min-w-0 flex-1">
         <RouteMap center={scenario.center} level={scenario.level} routes={routes} markers={markers} />
       </div>
-      {parking && (
-        <div className="shrink-0 lg:h-full lg:w-96">
-          <ParkingCard parking={parking} novice={isNovice(profile)} />
-        </div>
-      )}
+      <div className="flex w-12 shrink-0 flex-col items-center gap-3 pt-1">
+        {parking && (
+          <RailButton glyph="P" label="주차" tone={parkingTone(odds)}>
+            <ParkingPanel parking={parking} odds={odds} />
+          </RailButton>
+        )}
+        {children}
+      </div>
     </div>
   );
 }
 
 /**
- * 목적지 주변 주차 정보 카드. 초보 운전자가 가장 어려워하는 건 평행주차인데, 데이터에
- * 평행/직각 컬럼이 없어 주차장유형(노상/노외)을 프록시로 쓴다 — 단정하지 않고 확률로만
- * 말한다 (lib/parking.ts).
+ * 레일 아이콘 하나. 접힌 상태는 동그란 버튼이고, 누르면 패널이 지도 위로 열린다
+ * (right-full — 레일 폭 w-12 안에는 글이 들어가지 않는다).
  *
- * 접힌 상태에도 판정 한 줄은 남긴다 — 눌러야 보이는 경고는 경고 노릇을 못 한다.
- * 펼치면 지도와 같은 높이까지만 늘고 안쪽에서 스크롤한다 (open:h-full).
+ * 패널 높이는 지도 높이(52vh / lg 68vh)에 맞춰 잡는다 — 더 키우면 지도를 넘어 아래
+ * 경로 카드를 덮는다. 좁은 화면에서는 그 여유가 없어 지도 높이 그대로다.
+ *
  * <details>는 네이티브라 여닫는 데 자바스크립트가 필요 없다 (서버 컴포넌트 그대로).
+ * 아이콘 색(tone)이 접힌 상태의 유일한 신호다 — 경고 등급을 여기서 잃지 않게 톤을 넘겨받는다.
  */
-function ParkingCard({ parking, novice }: { parking: Parking; novice: boolean }) {
-  const odds = parallelOdds(parking, novice);
-  // 색은 화면에서 가장 큰 소리다. 경력자에게 붉은 경고를 띄우면 "이 앱은 다 위험하다고 한다"가 된다.
-  // 숫자는 같으니 톤만 중립으로 내린다.
-  const tone = !novice
-    ? "bg-slate-100 text-slate-700"
+function RailButton({
+  glyph,
+  label,
+  tone = "bg-white text-slate-700",
+  children,
+}: {
+  glyph: string;
+  label: string;
+  tone?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    // name 이 같은 <details>는 하나만 열린다 (네이티브 아코디언) — 패널끼리 겹쳐 쌓이는 걸 JS 없이 막는다
+    <details name="rail" className="group relative">
+      <summary className="flex cursor-pointer list-none flex-col items-center gap-1 [&::-webkit-details-marker]:hidden">
+        <span
+          className={`grid h-11 w-11 place-items-center rounded-full text-sm font-bold shadow-md ring-1 ring-black/5 group-open:ring-2 group-open:ring-slate-400 ${tone}`}
+        >
+          {glyph}
+        </span>
+        <span className="text-[10px] leading-none text-slate-500">{label}</span>
+      </summary>
+      <div
+        className={`absolute top-0 right-full z-20 mr-2 max-h-[52vh] w-[min(34rem,calc(100vw-5rem))] overflow-y-auto rounded-2xl p-4 text-sm shadow-xl ring-1 ring-black/5 lg:max-h-[80vh] ${tone}`}
+      >
+        {children}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * 주차 아이콘·패널의 색. odds 가 없으면(경력자) 판정이 없으니 중립색이다 —
+ * 색은 화면에서 가장 큰 소리라, 판정하지 않기로 해 놓고 경고색만 남기면 앞뒤가 안 맞는다.
+ *
+ * 레일에서는 이 색이 접힌 상태의 유일한 신호다. 판정 한 줄이 아이콘 안에는 안 들어가니,
+ * 등급을 색으로라도 남긴다.
+ */
+function parkingTone(odds: ParallelOdds | null) {
+  return !odds
+    ? "bg-white text-slate-700"
     : odds.level === "high"
       ? "bg-rose-50 text-rose-900"
       : odds.level === "mixed"
         ? "bg-amber-50 text-amber-900"
         : "bg-sky-50 text-sky-900";
+}
 
+/**
+ * 목적지 주변 주차 정보.
+ *
+ * odds 가 있으면(초보) 평행주차 판정 + 도로 밖 주차장 추천을 낸다. 초보가 가장 어려워하는
+ * 게 평행주차인데 데이터에 평행/직각 컬럼이 없어, 주차장유형(노상/노외)을 프록시로 쓴다.
+ *
+ * odds 가 없으면(경력자) **판정 없이 주차장 목록만** 낸다. 평행이든 직각이든 상관없는
+ * 사람에게 추정 경고를 얹으면 안 볼 정보를 하나 더 만드는 것이고, 프록시로 추정한 값을
+ * 굳이 한 번 더 단언하는 셈이다. 가까운 순으로 사실만 준다.
+ */
+function ParkingPanel({ parking, odds }: { parking: Parking; odds: ParallelOdds | null }) {
   return (
-    <details
-      className={`group flex max-h-full flex-col overflow-hidden rounded-2xl ring-1 ring-black/5 lg:open:h-full ${tone}`}
-    >
-      <summary className="shrink-0 cursor-pointer list-none p-3.5 [&::-webkit-details-marker]:hidden">
-        <div className="flex items-center gap-2">
-          <span className="rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-bold">P</span>
-          <span className="text-sm font-semibold">목적지 주변 주차 정보</span>
-          <span className="ml-auto text-[10px] opacity-60 transition-transform group-open:rotate-180">▼</span>
-        </div>
-        <p className="mt-2 text-xs font-semibold leading-snug">{odds.headline}</p>
-        <p className="mt-0.5 text-[11px] tabular-nums opacity-70">
-          {parking.label} 도보 {parking.walkM}m · 노상 {odds.onStreet} · 노외 {odds.offStreet}
-        </p>
-        <p className="mt-2 text-[11px] opacity-60 group-open:hidden">눌러서 추천 주차장 보기</p>
-      </summary>
+    <div className="flex flex-col gap-2">
+      {odds ? (
+        <>
+          <p className="text-base font-bold leading-snug">{odds.headline}</p>
+          <p className="tabular-nums opacity-70">
+            {parking.label} 도보 {parking.walkM}m 내 {parking.total}곳
+          </p>
+          <p className="leading-relaxed">{odds.detail}</p>
+        </>
+      ) : (
+        <>
+          <p className="text-base font-bold leading-snug">{parking.label} 주변 주차장</p>
+          <p className="tabular-nums opacity-70">
+            도보 {parking.walkM}m 내 {parking.total}곳 · 가까운 순
+          </p>
+        </>
+      )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3.5 pb-3.5 text-xs">
-        <p className="leading-relaxed">{odds.detail}</p>
+      <ParkingMap parking={parking} split={!!odds} />
 
-        <ParkingMap parking={parking} />
-
-        {recommendedSpots(parking).map((s) => (
-          <div key={s.name + s.walkM} className="rounded-lg bg-white/70 p-2">
-            <div className="flex items-baseline gap-1.5">
-              <span className="font-medium">{s.name}</span>
-              <span className="rounded bg-black/5 px-1 py-0.5 text-[10px]">{s.type}</span>
-            </div>
-            <div className="mt-0.5 tabular-nums opacity-70">
-              도보 {s.walkM}m{s.spaces != null && ` · ${s.spaces}면`}
-              {s.fee && ` · ${s.fee}`}
-            </div>
+      {(odds ? recommendedSpots(parking) : nearestSpots(parking)).map((s) => (
+        <div key={s.name + s.walkM} className="rounded-lg bg-black/[0.04] p-2">
+          <div className="font-medium">{s.name}</div>
+          <div className="mt-0.5 tabular-nums opacity-70">
+            도보 {s.walkM}m{s.spaces != null && ` · ${s.spaces}면`}
+            {s.fee && ` · ${s.fee}`}
           </div>
-        ))}
+        </div>
+      ))}
 
-        <p className="text-[10px] leading-relaxed opacity-60">
-          개별 구획이 평행식인지 직각식인지는 공개 데이터에 없어, 주차장유형으로 추정한 확률입니다.
-          <br />
-          출처: {PARKING_SOURCE}
-        </p>
-      </div>
-    </details>
+      <p className="text-xs leading-relaxed opacity-60">
+        {odds && (
+          <>
+            개별 구획이 평행식인지 직각식인지는 공개 데이터에 없어, 주차장유형으로 추정한 확률입니다.
+            <br />
+          </>
+        )}
+        출처: {PARKING_SOURCE}
+      </p>
+    </div>
   );
 }
 
@@ -184,16 +237,30 @@ const 노상아이콘 = pin(
   [18, 18],
 );
 
+/** 판정을 안 낼 때(경력자) 쓰는 한 종류 아이콘. 구분하지 않기로 했으면 지도에서도 구분하지 않는다. */
+const 주차장아이콘 = pin(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+     <circle cx="11" cy="11" r="9" fill="#475569" stroke="#fff" stroke-width="2.5"/>
+     <text x="11" y="15" font-family="system-ui,sans-serif" font-size="11" font-weight="700"
+           fill="#fff" text-anchor="middle">P</text>
+   </svg>`,
+  [22, 22],
+);
+
 /**
  * 목적지 반경 안 주차장 미니 지도.
  *
  * 메인 지도(경로 전체 43~52km)에 찍으면 반경 1km가 화면의 2%라 전부 한 점으로 뭉친다.
  * 그래서 목적지만 담는 지도를 따로 둔다. 축척은 RouteMap 이 마커에 맞춰 잡는다.
+ *
+ * @param split 평행·직각 추정으로 아이콘을 가를지. 경력자에게는 끈다 — 판정을 안 내기로
+ *        해 놓고 지도에서만 색으로 갈라 두면, 말로 안 한 추정을 그림으로 하는 셈이다.
  */
-function ParkingMap({ parking }: { parking: Parking }) {
+function ParkingMap({ parking, split }: { parking: Parking; split: boolean }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="h-64 overflow-hidden rounded-lg">
+      {/* 패널이 지도 높이 안에 갇혀 있으니 작은 화면에서는 미니 지도를 낮춘다 — 안 그러면 추천 주차장이 다 스크롤 밖으로 밀린다 */}
+      <div className="h-56 overflow-hidden rounded-lg lg:h-80">
         <RouteMap
           center={parking.at}
           routes={[]}
@@ -201,23 +268,29 @@ function ParkingMap({ parking }: { parking: Parking }) {
             { coord: parking.at, label: parking.label },
             ...parking.spots.map((s) => ({
               coord: s.at,
-              label: `${s.name} (${s.type} · 도보 ${s.walkM}m)`,
-              icon: s.type === "노상" ? 노상아이콘 : 노외아이콘,
+              label: `${s.name} (도보 ${s.walkM}m${s.spaces != null ? ` · ${s.spaces}면` : ""})`,
+              icon: !split ? 주차장아이콘 : s.type === "노상" ? 노상아이콘 : 노외아이콘,
             })),
           ]}
         />
       </div>
-      {/* 아이콘은 말보다 단정적으로 읽힌다 — 추정이라는 걸 범례에 박아 둔다 */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] opacity-70">
-        <span className="flex items-center gap-1">
-          <span className="h-2.5 w-2.5 rounded-full bg-sky-600 ring-1 ring-white" />
-          노외 — 직각주차 추정
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs opacity-70">
+        {/* 아이콘은 말보다 단정적으로 읽힌다 — 추정이라는 걸 범례에 박아 둔다 */}
+        {split && (
+          <>
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-sky-600 ring-1 ring-white" />
+              직각주차 추정
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-white ring-1 ring-slate-400" />
+              평행주차 추정
+            </span>
+          </>
+        )}
+        <span className="w-full">
+          지도에 {parking.spots.length}곳 표시 (도보 {parking.walkM}m 내 {parking.total}곳)
         </span>
-        <span className="flex items-center gap-1">
-          <span className="h-2.5 w-2.5 rounded-full bg-white ring-1 ring-slate-400" />
-          노상 — 평행주차 추정
-        </span>
-        <span className="w-full">지도에 {parking.spots.length}곳 표시 (도보 {parking.walkM}m 내 {parking.total}곳)</span>
       </div>
     </div>
   );
@@ -264,19 +337,33 @@ async function Verified({
     label: `${r.label} (${r.location})`,
   }));
 
+  // AI 문장. await 하지 않고 promise 를 그대로 두 Suspense 자리에 넘긴다 —
+  // 지도·카드·근거는 AI를 기다리지 않고 먼저 뜨고, 문장만 나중에 채워진다.
+  // 같은 promise 를 두 곳에서 await 해도 호출은 한 번이다.
+  const ai = aiSentences(factsOf(scenario.label, profile, result, [fast, safe]));
+  const 규칙브리핑 = briefing(profile, result, { fast, safe });
+
   return (
     <>
-      {/* ② 경로 비교 — 지도 줄만 주차 카드 자리만큼 넓게 쓰고, 아래 내용은 원래 폭을 지킨다 */}
+      {/* ② 경로 비교 — 지도는 화면 폭을 다 쓰고, 아래 내용은 원래 폭을 지킨다 */}
       <MapArea
         scenario={scenario}
         profile={profile}
         routes={[line(fast, pick === "fast"), line(safe, pick === "safe")]}
         markers={[...scenario.markers, ...riskMarkers]}
-      />
+      >
+        {/* ④ 출발 전 팁 — AI가 쓰고, 실패하면 규칙 기반 문장으로 떨어진다 */}
+        <RailButton glyph="💡" label="팁" tone="bg-emerald-50 text-emerald-900">
+          <p className="text-base font-bold">출발 전 팁</p>
+          <Suspense fallback={<BriefingSkeleton n={규칙브리핑.length} />}>
+            <AiBriefing p={ai} fallback={규칙브리핑} />
+          </Suspense>
+        </RailButton>
+      </MapArea>
 
       <BelowMap>
         <section className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 items-start gap-3">
             <RouteCard r={fast} score={fastScore} recommended={pick === "fast"} result={result} live={live?.fast} />
             <RouteCard r={safe} score={safeScore} recommended={pick === "safe"} result={result} live={live?.safe} />
           </div>
@@ -298,56 +385,15 @@ async function Verified({
           )}
         </section>
 
-        {/* ③ 근거 카드 */}
-        <section className="flex flex-col gap-3">
-          <div>
-            <h2 className="text-sm font-semibold">추천 근거</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              적용된 가중치:{" "}
-              {activeWeights(profile).length ? activeWeights(profile).join(" · ") : "없음 (기본점수 그대로)"}
-            </p>
-          </div>
-
-          {routes.map((r) => (
-            <div key={r.id} className="rounded-2xl bg-slate-50 p-4">
-              <div className="flex items-center gap-2 border-l-4 pl-2" style={{ borderColor: r.color }}>
-                <span className="text-sm font-semibold">{r.name}</span>
-                <span className="ml-auto text-sm font-bold tabular-nums">
-                  {r.id === "fast" ? fastScore : safeScore}
-                </span>
-              </div>
-              <ul className="mt-3 flex flex-col gap-3">
-                {rowsOf(result, r).map(({ risk, base, exposure, multiplier, weighted }) => (
-                  <li key={risk.label} className="text-xs">
-                    <div className="flex justify-between gap-2 text-slate-800">
-                      <span className="font-medium">{risk.label}</span>
-                      <span className="shrink-0 text-slate-500">{risk.location}</span>
-                    </div>
-                    <div className="mt-0.5 flex justify-between gap-2 text-slate-500">
-                      <span className="tabular-nums">
-                        {risk.value} · 경로의 {Math.round(risk.exposure * 100)}%
-                      </span>
-                      <span className="shrink-0 font-semibold tabular-nums text-slate-700">{weighted}점</span>
-                    </div>
-                    <div className="mt-0.5 text-[11px] tabular-nums text-slate-400">
-                      기본 {base} × 노출 {exposure} × 조건 {multiplier}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-amber-600">{risk.source}</div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </section>
-
-        {/* ④ 출발 전 브리핑 */}
-        <section className="rounded-2xl bg-emerald-50 p-4">
-          <h2 className="text-sm font-semibold">출발 전 브리핑</h2>
-          <div className="mt-2 flex flex-col gap-1.5 text-sm leading-relaxed text-slate-700">
-            {briefing(profile, result, { fast, safe }).map((line) => (
-              <p key={line}>{line}</p>
-            ))}
-          </div>
+        {/* ③ 근거 — 항목별 계산은 각 경로 카드 안으로 접었다 (RouteCard). 여기 남는 건 두 카드에 공통인 것뿐이다 */}
+        <section>
+          <Suspense fallback={null}>
+            <AiSummary p={ai} />
+          </Suspense>
+          <p className="mt-1 text-xs text-slate-500">
+            적용된 가중치:{" "}
+            {activeWeights(profile).length ? activeWeights(profile).join(" · ") : "없음 (기본점수 그대로)"}
+          </p>
         </section>
 
         {/* 실시간과 굳힌 값이 섞여 있으니 어느 숫자가 어디서 왔는지 갈라 적는다 */}
@@ -365,8 +411,8 @@ async function Verified({
 }
 
 /**
- * 지도 아래 본문. 지도 줄만 주차 카드 자리(lg:w-72)만큼 넓어졌을 뿐, 읽는 내용은
- * 원래 폭(max-w-2xl) 그대로다 — 카드가 화면 끝까지 늘어나면 읽기 나빠진다.
+ * 지도 아래 본문. 지도는 화면 폭을 다 쓰지만 읽는 내용은 원래 폭(max-w-2xl) 그대로다
+ * — 카드가 화면 끝까지 늘어나면 읽기 나빠진다.
  * 가운데 정렬하지 않는다: 지도 왼쪽 끝과 선을 맞춰야 따로 노는 느낌이 안 든다.
  */
 function BelowMap({ children }: { children: React.ReactNode }) {
@@ -385,6 +431,50 @@ function rowsOf(result: ReturnType<typeof scoreRoutes>, route: Route) {
     .filter((b) => b.risk);
 }
 
+/**
+ * AI 문장 자리. 지도·카드·근거가 AI를 기다리지 않게 Suspense 안에서만 await 한다.
+ * 같은 promise 를 두 컴포넌트가 await 하지만 모델 호출은 한 번이다.
+ *
+ * AI가 실패하면(null) 브리핑은 규칙 기반 문장으로 떨어지고, 근거 요약은 아예 사라진다 —
+ * 요약은 없어도 근거 카드가 수치·출처를 다 보여주므로 빈 자리가 거짓말이 되지 않는다.
+ */
+async function AiSummary({ p }: { p: Promise<AiSentences | null> }) {
+  const ai = await p;
+  if (!ai) return null;
+  return <p className="mt-1 text-xs leading-relaxed text-slate-600">{ai.summary}</p>;
+}
+
+async function AiBriefing({ p, fallback }: { p: Promise<AiSentences | null>; fallback: string[] }) {
+  const ai = await p;
+  const lines = ai?.briefing ?? fallback;
+  return (
+    <>
+      <div className="mt-2 flex flex-col gap-1.5 text-sm leading-relaxed text-slate-700">
+        {lines.map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+      {/* 어느 쪽이 쓴 문장인지 밝힌다 — AI가 썼는지 규칙이 썼는지는 신뢰의 문제다 */}
+      <p className="mt-2 text-[11px] text-slate-400">
+        {ai
+          ? "생성형 AI가 계산된 수치와 확인된 위험요인만으로 작성했습니다."
+          : "AI 문장을 받지 못해 계산 결과로 조립한 문장입니다."}
+      </p>
+    </>
+  );
+}
+
+/** AI를 기다리는 동안. 문장 수만큼 회색 줄을 둬서 뜨는 순간 높이가 튀지 않는다. */
+function BriefingSkeleton({ n }: { n: number }) {
+  return (
+    <div className="mt-2 flex animate-pulse flex-col gap-2" aria-label="팁 작성 중">
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className="h-4 rounded bg-emerald-200/60" style={{ width: `${100 - i * 12}%` }} />
+      ))}
+    </div>
+  );
+}
+
 function RouteCard({
   r,
   score,
@@ -401,45 +491,72 @@ function RouteCard({
 }) {
   const 혼잡 = live && congestionLabel(live.congestion);
   return (
-    <div
-      className={`rounded-2xl p-4 ${recommended ? "bg-emerald-50 ring-2 ring-emerald-300" : "bg-slate-50"}`}
+    <details
+      className={`group rounded-2xl p-4 ${recommended ? "bg-emerald-50 ring-2 ring-emerald-300" : "bg-slate-50"}`}
     >
-      <div className="flex items-center gap-2">
-        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
-        <span className="text-sm font-semibold">{r.name}</span>
-      </div>
-      <div className="mt-0.5 text-[11px] text-slate-400">{r.badge}</div>
-      <div className="mt-1 text-xs tabular-nums text-slate-500">
-        {r.durationMin != null && r.distanceKm != null
-          ? `${r.durationMin}분 · ${r.distanceKm}km`
-          : "소요시간·거리 확인 중"}
-      </div>
-      {live && (
-        <div
-          className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${
-            혼잡 ? "bg-rose-100 text-rose-700" : "bg-slate-200 text-slate-600"
-          }`}
-        >
-          {혼잡 ? `지금 ${혼잡}` : "지금 원활"}
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <div className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: r.color }} />
+          <span className="text-sm font-semibold">{r.name}</span>
         </div>
-      )}
-      <div className="mt-1 flex items-baseline gap-1.5">
-        <span className="text-3xl font-bold tabular-nums">{score}</span>
-        <span className="text-xs text-slate-500">부담점수</span>
-      </div>
-      {recommended && (
-        <div className="mt-1.5 inline-block rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-medium text-white">
-          추천
+        <div className="mt-0.5 text-[11px] text-slate-400">{r.badge}</div>
+        <div className="mt-1 text-xs tabular-nums text-slate-500">
+          {r.durationMin != null && r.distanceKm != null
+            ? `${r.durationMin}분 · ${r.distanceKm}km`
+            : "소요시간·거리 확인 중"}
         </div>
-      )}
-      <ul className="mt-2.5 space-y-0.5 text-xs text-slate-500">
-        {rowsOf(result, r).map(({ risk, weighted }) => (
-          <li key={risk.label} className="flex justify-between gap-2">
-            <span className="truncate">{risk.label}</span>
-            <span className="shrink-0 tabular-nums">{weighted}</span>
+        {live && (
+          <div
+            className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${
+              혼잡 ? "bg-rose-100 text-rose-700" : "bg-slate-200 text-slate-600"
+            }`}
+          >
+            {혼잡 ? `지금 ${혼잡}` : "지금 원활"}
+          </div>
+        )}
+        <div className="mt-1 flex items-baseline gap-1.5">
+          <span className="text-3xl font-bold tabular-nums">{score}</span>
+          <span className="text-xs text-slate-500">부담점수</span>
+        </div>
+        {recommended && (
+          <div className="mt-1.5 inline-block rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-medium text-white">
+            추천
+          </div>
+        )}
+        <ul className="mt-2.5 space-y-0.5 text-xs text-slate-500">
+          {rowsOf(result, r).map(({ risk, weighted }) => (
+            <li key={risk.label} className="flex justify-between gap-2">
+              <span className="truncate">{risk.label}</span>
+              <span className="shrink-0 tabular-nums">{weighted}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400">
+          <span className="group-open:hidden">눌러서 계산 근거 보기</span>
+          <span className="hidden group-open:inline">계산 근거</span>
+          <span className="text-[9px] transition-transform group-open:rotate-180">▼</span>
+        </p>
+      </summary>
+
+      {/* 항목별 계산 — 요약 줄의 숫자가 어디서 나왔는지 (기본 × 노출 × 조건) */}
+      <ul className="mt-2 flex flex-col gap-2.5 border-t border-black/5 pt-2.5">
+        {rowsOf(result, r).map(({ risk, base, exposure, multiplier, weighted }) => (
+          <li key={risk.label} className="text-xs">
+            <div className="flex justify-between gap-2 text-slate-800">
+              <span className="font-medium">{risk.label}</span>
+              <span className="shrink-0 font-semibold tabular-nums">{weighted}점</span>
+            </div>
+            <div className="mt-0.5 text-[11px] text-slate-500">{risk.location}</div>
+            <div className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+              {risk.value} · 경로의 {Math.round(risk.exposure * 100)}%
+            </div>
+            <div className="mt-0.5 text-[11px] tabular-nums text-slate-400">
+              기본 {base} × 노출 {exposure} × 조건 {multiplier}
+            </div>
+            <div className="mt-0.5 text-[11px] text-amber-600">{risk.source}</div>
           </li>
         ))}
       </ul>
-    </div>
+    </details>
   );
 }

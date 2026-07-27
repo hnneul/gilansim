@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import RouteMap from "./RouteMap";
-import { scoreRoutes, type DriverProfile } from "@/lib/score";
+import { scoreRoutes, activeWeights, type DriverProfile } from "@/lib/score";
 import { FAST, SAFE, MARKERS, MAP_CENTER, type Scenario } from "@/lib/scenario";
 
 const 초보: DriverProfile = {
@@ -100,8 +100,8 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <RouteCard s={FAST} score={fastScore} recommended={pick === "fast"} result={result} />
-          <RouteCard s={SAFE} score={safeScore} recommended={pick === "safe"} result={result} />
+          <RouteCard s={FAST} score={fastScore} recommended={pick === "fast"} />
+          <RouteCard s={SAFE} score={safeScore} recommended={pick === "safe"} />
         </div>
 
         {pick === "single" && (
@@ -109,10 +109,50 @@ export default function Home() {
             두 경로의 부담 차이가 작습니다 — 익숙한 경로를 이용하세요
           </p>
         )}
+      </section>
 
-        <p className="text-xs text-amber-600">
-          ⚠️ 임시 데이터 — 위험요인의 위치·수치·출처가 모두 미확보 상태입니다
-        </p>
+      {/* ③ 근거 카드 */}
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">추천 근거</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            적용된 가중치:{" "}
+            {activeWeights(profile).length ? activeWeights(profile).join(" · ") : "없음 (기본점수 그대로)"}
+          </p>
+        </div>
+
+        {[FAST, SAFE].map((s) => (
+          <div key={s.id} className="rounded-2xl bg-slate-50 p-4">
+            <div className="flex items-center gap-2 border-l-4 pl-2" style={{ borderColor: s.color }}>
+              <span className="text-sm font-semibold">{s.name}</span>
+              <span className="ml-auto text-sm font-bold tabular-nums">
+                {s.id === "fast" ? fastScore : safeScore}
+              </span>
+            </div>
+            <ul className="mt-3 flex flex-col gap-3">
+              {result.breakdown
+                .filter((r) => r.route === s.id)
+                .sort((a, b) => b.weighted - a.weighted)
+                .map(({ risk, base, multiplier, weighted }) => (
+                  <li key={risk.label} className="text-xs">
+                    <div className="flex justify-between gap-2 text-slate-800">
+                      <span className="font-medium">{risk.label}</span>
+                      <span className="shrink-0 text-slate-500">{risk.location}</span>
+                    </div>
+                    <div className="mt-0.5 flex justify-between gap-2 text-slate-500">
+                      <span className="tabular-nums">
+                        {risk.value} · 기본 {base} × {multiplier}
+                      </span>
+                      <span className="shrink-0 font-semibold tabular-nums text-slate-700">
+                        {weighted}점
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-amber-600">{risk.source}</div>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        ))}
       </section>
     </main>
   );
@@ -141,18 +181,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function RouteCard({
-  s,
-  score,
-  recommended,
-  result,
-}: {
-  s: Scenario;
-  score: number;
-  recommended: boolean;
-  result: ReturnType<typeof scoreRoutes>;
-}) {
-  const rows = result.breakdown.filter((r) => r.route === s.id);
+function RouteCard({ s, score, recommended }: { s: Scenario; score: number; recommended: boolean }) {
   return (
     <div className={`rounded-2xl p-4 ${recommended ? "bg-emerald-50 ring-2 ring-emerald-300" : "bg-slate-50"}`}>
       <div className="flex items-center gap-2">
@@ -168,14 +197,6 @@ function RouteCard({
           추천
         </div>
       )}
-      <ul className="mt-2.5 space-y-0.5 text-xs text-slate-500">
-        {rows.map((r) => (
-          <li key={r.factor} className="flex justify-between gap-2">
-            <span className="truncate">{r.factor}</span>
-            <span className="shrink-0 tabular-nums">{r.weighted}</span>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

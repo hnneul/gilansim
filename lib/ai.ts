@@ -18,13 +18,16 @@ import type { RiskFactor, ScoreResult, DriverProfile } from "./score.ts";
 import { COMFORT_THRESHOLD, activeWeights } from "./score.ts";
 
 /**
- * 후보는 **두 제공자**다 (askModel 이 순서대로 시도한다). 무료 한도는 제공자별로 따로 차므로
- * 한쪽이 마른 날에도 문장이 나온다 — 한 곳만 박아두면 남은 예산을 두고 규칙 문장만 나간다.
+ * 후보는 **세 제공자**다 (askModel 이 순서대로 시도한다). OpenAI 팀 크레딧을 먼저 쓰고,
+ * Groq/Gemini 무료 한도는 예비로 남긴다 — 한 곳만 박아두면 남은 예산을 두고 규칙 문장만 나간다.
  * 대신 답한 쪽이 바뀌면 같은 입력에 문장이 달라진다. 문장을 아예 못 내보내는 것보다는 낫다.
  *
  * 별칭이 아니라 버전이 박힌 이름을 쓴다 — 별칭은 모델이 조용히 올라가 문장이 바뀐다.
  *
- * ① Groq / gpt-oss-120b — 예산이 가장 크다.
+ * ① OpenAI / gpt-5.6-luna — 팀 크레딧으로 쓰는 1순위. 이 화면은 사실을 자연어로 옮기는
+ *    일이므로 고가 모델보다 낮은 비용의 Luna 가 맞다. 출력은 아래 verify() 가 다시 거른다.
+ *
+ * ② Groq / gpt-oss-120b — 예비 무료 한도.
  *    분당 8,000토큰 · **모델당 하루 200,000토큰(TPD)**. 먼저 닿는 건 TPD 다
  *    (429 본문: "on tokens per day (TPD): Limit 200000, Used 198869"). 호출당 약 4,000토큰이라
  *    **하루 50번쯤**이고, 시연 리허설 스무 번이면 그날 예산의 절반이 사라진다.
@@ -33,13 +36,15 @@ import { COMFORT_THRESHOLD, activeWeights } from "./score.ts";
  *    response format json_schema"), 20b 는 briefing 을 배열이 아니라 문자열로 써서
  *    400 "expected array, but got string" 이 온다. 스키마를 못 지키는 모델은 넣을 수 없다.
  *
- * ② Gemini — 지갑이 다르다. 같은 프롬프트·같은 스키마로 2~3초에 답하고 verify() 를 그대로
+ * ③ Gemini — 지갑이 다르다. 같은 프롬프트·같은 스키마로 2~3초에 답하고 verify() 를 그대로
  *    통과한다. 무료 쿼터가 Groq 보다 빡빡하고(모델당 20회) 모델별로 갈려서 후보를 둘 둔다
  *    (아래 GEMINI_MODELS 의 실측표).
  *
- * 두 후보가 다 실패하면 캐시(aiSentences)도 규칙 폴백(lib/briefing.ts)도 정상 동작 경로다 —
+ * 세 후보가 다 실패하면 캐시(aiSentences)도 규칙 폴백(lib/briefing.ts)도 정상 동작 경로다 —
  * 장식이 아니라 이 앱이 인터넷·한도 없이도 말을 하게 하는 장치다.
  */
+const OPENAI_MODEL = "gpt-5.6-luna";
+const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
 const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 /**
@@ -324,11 +329,44 @@ export function promptOf(facts: Facts): string {
  */
 export async function askModel(prompt: string): Promise<unknown | null> {
   // 앞에서부터 시도한다. 한도에 걸린 후보는 0.2초에 429 로 떨어지므로 줄줄이 세워도 싸다.
-  for (const 부르기 of [() => groq(prompt), ...GEMINI_MODELS.map((m) => () => gemini(prompt, m))]) {
+  for (const 부르기 of [() => openai(prompt), () => groq(prompt), ...GEMINI_MODELS.map((m) => () => gemini(prompt, m))]) {
     const out = await 부르기();
     if (out !== null) return out;
   }
   return null;
+}
+
+/** OpenAI. 팀 크레딧이 붙은 1순위 후보 — 실패하면 기존 무료 후보로 넘어간다. */
+async function openai(prompt: string): Promise<unknown | null> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+
+  try {
+    const res = await fetch(OPENAI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        temperature: 0,
+        reasoning_effort: "low",
+        max_completion_tokens: 4096,
+        messages: [{ role: "user", content: prompt }],
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "sentences", strict: true, schema: SCHEMA },
+        },
+      }),
+    });
+    if (!res.ok) return null;
+
+    const text = (await res.json()).choices?.[0]?.message?.content;
+    if (typeof text !== "string") return null;
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 /** Groq. 실패(한도·타임아웃·파싱)는 전부 null 이고, 부르는 쪽이 다음 후보로 넘어간다. */
